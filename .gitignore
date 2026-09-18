@@ -1,0 +1,66 @@
+# Terraform working directories
+.terraform/
+terraform.tfstate.d/
+
+# Terraform state and state locks
+*.tfstate
+*.tfstate.*
+*.tfstate.lock.info
+
+# Saved plans
+*.tfplan
+*.plan
+tfplan
+
+# Terraform crash logs
+crash.log
+crash.*.log
+
+# Local Terraform overrides
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Local Terraform CLI configuration
+.terraformrc
+terraform.rc
+
+# Local variable files. Checked-in demo.tfvars files remain trackable.
+local.tfvars
+local.tfvars.json
+*.local.tfvars
+*.local.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+
+# Verification output
+evidence/
+
+# Local environment and credential files
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.p12
+
+# Logs, temporary files, and local backups
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+*~
+*_bkp
+
+# Editor and IDE settings
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
