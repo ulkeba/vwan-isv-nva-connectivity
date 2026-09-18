@@ -1,0 +1,26 @@
+subscription_id = "eaf4193c-36fa-42b9-b284-5ef3f7e8646c"
+location        = "Sweden Central"
+
+resource_group_name = "rg-vwan-customer-demo"
+virtual_wan_name    = "vwan-customer-demo"
+virtual_hub_name    = "vhub-customer-demo"
+
+virtual_hub_address_prefix             = "10.0.0.0/23"
+customer_virtual_network_name          = "vnet-customer-demo"
+customer_virtual_network_address_space = "10.10.0.0/16"
+customer_workload_subnet_name          = "snet-workload"
+customer_workload_subnet_prefix        = "10.10.1.0/24"
+customer_bastion_subnet_prefix         = "10.10.255.0/26"
+isv_workload_address_prefix            = "10.100.1.0/24"
+
+customer_workload_network_security_group_name = "nsg-customer-workload-demo"
+customer_workload_vm_name                     = "vm-customer-workload-demo"
+customer_workload_private_ip_address          = "10.10.1.10"
+customer_workload_vm_size                     = "Standard_B2s"
+customer_workload_admin_username              = "azureuser"
+customer_workload_ssh_public_key_path         = "~/.ssh/ecs-vwan-fwaas-demo.pub"
+customer_workload_zone                        = "1"
+
+customer_bastion_public_ip_name   = "pip-customer-bastion-demo"
+customer_bastion_name             = "bas-customer-demo"
+customer_workload_connection_name = "conn-customer-workload-demo"

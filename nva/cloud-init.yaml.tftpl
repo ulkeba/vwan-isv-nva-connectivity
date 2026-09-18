@@ -1,0 +1,101 @@
+#cloud-config
+package_update: true
+packages:
+  - nftables
+
+write_files:
+  - path: /etc/sysctl.d/99-nva-forwarding.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      net.ipv4.ip_forward = 1
+      net.ipv4.conf.all.forwarding = 1
+      net.ipv4.conf.default.forwarding = 1
+      net.ipv4.conf.all.rp_filter = 0
+      net.ipv4.conf.default.rp_filter = 0
+
+  - path: /etc/nftables.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      #!/usr/sbin/nft -f
+      flush ruleset
+
+      table inet nva_forward {
+        counter customer_to_isv {
+          comment "Customer workload to ISV workload"
+        }
+
+        counter isv_to_customer {
+          comment "ISV workload to customer workload"
+        }
+
+        chain forward {
+          type filter hook forward priority filter; policy drop;
+          ip saddr ${customer_workload_cidr} ip daddr ${isv_workload_cidr} counter name customer_to_isv accept
+          ip saddr ${isv_workload_cidr} ip daddr ${customer_workload_cidr} counter name isv_to_customer accept
+        }
+      }
+
+  - path: /usr/local/bin/show-forwarding-counters
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      exec nft list counters table inet nva_forward
+
+  - path: /usr/local/sbin/forwarding-health
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/python3
+      import os
+      import socket
+
+      if int(os.environ.get("LISTEN_FDS", "0")) != 1:
+          raise SystemExit("exactly one systemd socket is required")
+
+      listener = socket.fromfd(3, socket.AF_INET, socket.SOCK_STREAM)
+      while True:
+          connection, _ = listener.accept()
+          with connection:
+              connection.sendall(b"OK\n")
+
+  - path: /usr/local/bin/check-forwarding-health
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/python3
+      import socket
+
+      with socket.create_connection(("127.0.0.1", ${probe_port}), timeout=5) as connection:
+          if connection.recv(3) != b"OK\n":
+              raise SystemExit("forwarding health responder returned an invalid response")
+
+  - path: /etc/systemd/system/forwarding-health.service
+    owner: root:root
+    permissions: "0644"
+    content: |
+      ${indent(6, forwarding_health_service)}
+
+  - path: /etc/systemd/system/forwarding-health.socket
+    owner: root:root
+    permissions: "0644"
+    content: |
+      ${indent(6, forwarding_health_socket)}
+
+runcmd:
+  - [sysctl, --system]
+  - [nft, --check, --file, /etc/nftables.conf]
+  - [systemctl, enable, nftables.service]
+  - [systemctl, restart, nftables.service]
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, --now, forwarding-health.socket]
+  - [sh, -c, 'test "$(sysctl -n net.ipv4.ip_forward)" = 1']
+  - [nft, list, counter, inet, nva_forward, customer_to_isv]
+  - [nft, list, counter, inet, nva_forward, isv_to_customer]
+  - [systemctl, is-active, --quiet, forwarding-health.socket]
+  - [/usr/local/bin/check-forwarding-health]
+  - [systemctl, is-active, --quiet, forwarding-health.service]
+
+final_message: "NVA forwarding and health probe configured successfully"

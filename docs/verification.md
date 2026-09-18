@@ -1,0 +1,449 @@
+# Verification runbook
+
+This is a linear copy/paste runbook for proving route convergence, NVA
+traversal, source-address preservation, and single-NVA failover.
+
+## Prerequisites
+
+Install `jq`, Terraform, Azure CLI, and OpenSSH. Sign in with `az login`, apply
+all four Terraform roots, and make sure the demo SSH private key is readable.
+
+On Ubuntu or WSL, install `jq` with:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y jq
+```
+
+Run **every command below from the repository root in one ongoing interactive
+shell**. Do not change shells partway through: `environment.sh` is sourced once
+and its variables are used by all later commands.
+
+## 1. Capture deployment outputs and load variables
+
+The four JSON files are the initial deployment evidence. `environment.sh`
+reads these exact paths with `jq`.
+
+```bash
+test -f ./environment.sh
+test -x ./scripts/show-effective-routes.sh
+test -x ./scripts/show-nva-counters.sh
+test -x ./scripts/test-connectivity.sh
+command -v jq
+mkdir -p evidence
+
+terraform -chdir=01-isv-core output -json > evidence/01-isv-core.json
+terraform -chdir=02-customer-core output -json > evidence/02-customer-core.json
+terraform -chdir=03-isv-routing output -json > evidence/03-isv-routing.json
+terraform -chdir=04-customer-connection output -json > evidence/04-customer-connection.json
+
+source ./environment.sh
+test -r "$SSH_KEY"
+```
+
+Values that only exist in the live Azure resources can be added explicitly
+after sourcing:
+
+```bash
+export ISV_ADMIN_USERNAME="$(az vm show \
+  --ids "$ISV_WORKLOAD_VM_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --query osProfile.adminUsername \
+  --output tsv)"
+export CUSTOMER_ADMIN_USERNAME="$(az vm show \
+  --ids "$CUSTOMER_WORKLOAD_VM_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --query osProfile.adminUsername \
+  --output tsv)"
+
+az account show \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --output json > "$EVIDENCE_DIR/azure-account.json"
+printf 'ISV administrator: %s\nCustomer administrator: %s\n' \
+  "$ISV_ADMIN_USERNAME" "$CUSTOMER_ADMIN_USERNAME" \
+  | tee "$EVIDENCE_DIR/admin-usernames.txt"
+```
+
+## 2. Confirm provisioning and routing state
+
+```bash
+az network vhub show \
+  --ids "$VIRTUAL_HUB_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --query '{provisioningState:provisioningState,routingState:routingState}' \
+  --output json > "$EVIDENCE_DIR/virtual-hub-status.json"
+az network vhub show \
+  --ids "$VIRTUAL_HUB_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --query '{provisioningState:provisioningState,routingState:routingState}' \
+  --output table | tee "$EVIDENCE_DIR/virtual-hub-status.txt"
+
+az network vhub connection show \
+  --ids "$CUSTOMER_WORKLOAD_CONNECTION_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --output json > "$EVIDENCE_DIR/customer-hub-connection-status.json"
+az network vhub connection show \
+  --ids "$CUSTOMER_WORKLOAD_CONNECTION_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --query '{name:name,provisioningState:provisioningState}' \
+  --output table | tee "$EVIDENCE_DIR/customer-hub-connection-status.txt"
+
+az network vhub connection show \
+  --ids "$ISV_HUB_CONNECTION_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --output json > "$EVIDENCE_DIR/isv-hub-connection-status.json"
+az network vhub connection show \
+  --ids "$ISV_HUB_CONNECTION_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --query '{name:name,provisioningState:provisioningState}' \
+  --output table | tee "$EVIDENCE_DIR/isv-hub-connection-status.txt"
+```
+
+Continue only when the hub provisioning state is `Succeeded`, the hub routing
+state is **`Provisioned`**, and both connections are `Succeeded`.
+
+## 3. Inspect effective routes
+
+Use the repository helper for tunnel-free route inspection:
+
+```bash
+./scripts/show-effective-routes.sh \
+  --virtual-hub-id "$VIRTUAL_HUB_ID" \
+  --customer-nic-id "$CUSTOMER_WORKLOAD_NIC_ID" \
+  --isv-nic-id "$ISV_WORKLOAD_NIC_ID" \
+  --nva-nic-id "$NVA_1_NIC_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  | tee "$EVIDENCE_DIR/effective-routes.txt"
+```
+
+Capture the underlying structured Azure CLI results separately:
+
+```bash
+az network vhub get-effective-routes \
+  --ids "$VIRTUAL_HUB_ID" \
+  --resource-type RouteTable \
+  --resource-id "$DEFAULT_HUB_ROUTE_TABLE_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --output json > "$EVIDENCE_DIR/virtual-hub-effective-routes.json"
+
+az network nic show-effective-route-table \
+  --ids "$CUSTOMER_WORKLOAD_NIC_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --output json > "$EVIDENCE_DIR/customer-nic-effective-routes.json"
+az network nic show-effective-route-table \
+  --ids "$ISV_WORKLOAD_NIC_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --output json > "$EVIDENCE_DIR/isv-nic-effective-routes.json"
+az network nic show-effective-route-table \
+  --ids "$NVA_1_NIC_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --output json > "$EVIDENCE_DIR/nva-1-nic-effective-routes.json"
+```
+
+Confirm the customer learns the ISV prefix, the ISV workload sends the customer
+prefix to `$NVA_LOAD_BALANCER_FRONTEND_IP`, and NVA 1 can route the customer
+prefix through the hub. Routes support the traffic evidence; they do not
+replace it.
+
+## 4. Capture counters, then test both directions
+
+Capture the baseline NVA counters. The helper owns the Bastion tunnel details.
+
+```bash
+./scripts/show-nva-counters.sh \
+  --bastion-name "$ISV_BASTION_NAME" \
+  --resource-group "$ISV_RESOURCE_GROUP" \
+  --admin-username "$ISV_ADMIN_USERNAME" \
+  --ssh-key "$SSH_KEY" \
+  --nva-vm-id "$NVA_1_VM_ID" \
+  --nva-vm-id "$NVA_2_VM_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  | tee "$EVIDENCE_DIR/nva-counters-before.txt"
+```
+
+Customer to ISV:
+
+```bash
+./scripts/test-connectivity.sh \
+  --direction customer-to-isv \
+  --source-bastion-name "$CUSTOMER_BASTION_NAME" \
+  --source-resource-group "$CUSTOMER_RESOURCE_GROUP" \
+  --source-vm-id "$CUSTOMER_WORKLOAD_VM_ID" \
+  --source-username "$CUSTOMER_ADMIN_USERNAME" \
+  --ssh-key "$SSH_KEY" \
+  --destination-ip "$ISV_WORKLOAD_PRIVATE_IP" \
+  --expected-source-ip "$CUSTOMER_WORKLOAD_PRIVATE_IP" \
+  --destination-bastion-name "$ISV_BASTION_NAME" \
+  --destination-resource-group "$ISV_RESOURCE_GROUP" \
+  --destination-vm-id "$ISV_WORKLOAD_VM_ID" \
+  --destination-username "$ISV_ADMIN_USERNAME" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  | tee "$EVIDENCE_DIR/connectivity-customer-to-isv.txt"
+```
+
+ISV to customer:
+
+```bash
+./scripts/test-connectivity.sh \
+  --direction isv-to-customer \
+  --source-bastion-name "$ISV_BASTION_NAME" \
+  --source-resource-group "$ISV_RESOURCE_GROUP" \
+  --source-vm-id "$ISV_WORKLOAD_VM_ID" \
+  --source-username "$ISV_ADMIN_USERNAME" \
+  --ssh-key "$SSH_KEY" \
+  --destination-ip "$CUSTOMER_WORKLOAD_PRIVATE_IP" \
+  --expected-source-ip "$ISV_WORKLOAD_PRIVATE_IP" \
+  --destination-bastion-name "$CUSTOMER_BASTION_NAME" \
+  --destination-resource-group "$CUSTOMER_RESOURCE_GROUP" \
+  --destination-vm-id "$CUSTOMER_WORKLOAD_VM_ID" \
+  --destination-username "$CUSTOMER_ADMIN_USERNAME" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  | tee "$EVIDENCE_DIR/connectivity-isv-to-customer.txt"
+```
+
+Capture the counters again:
+
+```bash
+./scripts/show-nva-counters.sh \
+  --bastion-name "$ISV_BASTION_NAME" \
+  --resource-group "$ISV_RESOURCE_GROUP" \
+  --admin-username "$ISV_ADMIN_USERNAME" \
+  --ssh-key "$SSH_KEY" \
+  --nva-vm-id "$NVA_1_VM_ID" \
+  --nva-vm-id "$NVA_2_VM_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  | tee "$EVIDENCE_DIR/nva-counters-after.txt"
+```
+
+Successful TCP checks, destination-observed source addresses, and increasing
+NVA counters are the authoritative result. ICMP is only supporting evidence.
+
+## 5. Prove NVA 1 failover (disruptive)
+
+> **WARNING:** These commands stop NVA 1. Never stop both NVAs. There is no
+> automatic restoration if the shell, terminal, or command sequence is
+> interrupted. Copy the restore command below somewhere accessible before
+> starting, and run it immediately after the failover test.
+
+**NVA 1 restore command:**
+
+```bash
+az vm start \
+  --ids "$NVA_1_VM_ID" \
+  --subscription "$AZURE_SUBSCRIPTION"
+```
+
+Stop NVA 1 and record its state:
+
+```bash
+az vm stop \
+  --ids "$NVA_1_VM_ID" \
+  --subscription "$AZURE_SUBSCRIPTION"
+az vm wait \
+  --ids "$NVA_1_VM_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --updated \
+  --custom "instanceView.statuses[?code=='PowerState/stopped']"
+az vm get-instance-view \
+  --ids "$NVA_1_VM_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --output json > "$EVIDENCE_DIR/nva-1-stopped-instance-view.json"
+sleep 30
+```
+
+Test customer-to-ISV traffic while NVA 1 is stopped:
+
+```bash
+./scripts/test-connectivity.sh \
+  --direction customer-to-isv \
+  --source-bastion-name "$CUSTOMER_BASTION_NAME" \
+  --source-resource-group "$CUSTOMER_RESOURCE_GROUP" \
+  --source-vm-id "$CUSTOMER_WORKLOAD_VM_ID" \
+  --source-username "$CUSTOMER_ADMIN_USERNAME" \
+  --ssh-key "$SSH_KEY" \
+  --destination-ip "$ISV_WORKLOAD_PRIVATE_IP" \
+  --expected-source-ip "$CUSTOMER_WORKLOAD_PRIVATE_IP" \
+  --destination-bastion-name "$ISV_BASTION_NAME" \
+  --destination-resource-group "$ISV_RESOURCE_GROUP" \
+  --destination-vm-id "$ISV_WORKLOAD_VM_ID" \
+  --destination-username "$ISV_ADMIN_USERNAME" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  | tee "$EVIDENCE_DIR/failover-customer-to-isv.txt"
+```
+
+Test ISV-to-customer traffic while NVA 1 is stopped:
+
+```bash
+./scripts/test-connectivity.sh \
+  --direction isv-to-customer \
+  --source-bastion-name "$ISV_BASTION_NAME" \
+  --source-resource-group "$ISV_RESOURCE_GROUP" \
+  --source-vm-id "$ISV_WORKLOAD_VM_ID" \
+  --source-username "$ISV_ADMIN_USERNAME" \
+  --ssh-key "$SSH_KEY" \
+  --destination-ip "$CUSTOMER_WORKLOAD_PRIVATE_IP" \
+  --expected-source-ip "$ISV_WORKLOAD_PRIVATE_IP" \
+  --destination-bastion-name "$CUSTOMER_BASTION_NAME" \
+  --destination-resource-group "$CUSTOMER_RESOURCE_GROUP" \
+  --destination-vm-id "$CUSTOMER_WORKLOAD_VM_ID" \
+  --destination-username "$CUSTOMER_ADMIN_USERNAME" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  | tee "$EVIDENCE_DIR/failover-isv-to-customer.txt"
+```
+
+**Restore NVA 1 now, even if the traffic test failed:**
+
+```bash
+az vm start \
+  --ids "$NVA_1_VM_ID" \
+  --subscription "$AZURE_SUBSCRIPTION"
+az vm wait \
+  --ids "$NVA_1_VM_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --updated \
+  --custom "instanceView.statuses[?code=='PowerState/running']"
+az vm get-instance-view \
+  --ids "$NVA_1_VM_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  --output json > "$EVIDENCE_DIR/nva-1-restored-instance-view.json"
+```
+
+Capture counters and confirm NVA 2 handled the failover traffic:
+
+```bash
+./scripts/show-nva-counters.sh \
+  --bastion-name "$ISV_BASTION_NAME" \
+  --resource-group "$ISV_RESOURCE_GROUP" \
+  --admin-username "$ISV_ADMIN_USERNAME" \
+  --ssh-key "$SSH_KEY" \
+  --nva-vm-id "$NVA_1_VM_ID" \
+  --nva-vm-id "$NVA_2_VM_ID" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  | tee "$EVIDENCE_DIR/nva-counters-after-failover.txt"
+```
+
+## 6. Negative controls (optional and destructive)
+
+> **STRONG WARNING:** Each control intentionally destroys managed routing
+> resources and interrupts connectivity. Run only in an approved maintenance
+> window. Run only one control at a time. There is no automatic restoration
+> after interruption. The commands are interactive and intentionally omit
+> `-auto-approve`; read every Terraform prompt before approving. These examples
+> assume the deployment used `demo.tfvars`.
+
+### Remove and restore the ISV return-path route
+
+Destroy the route layer:
+
+```bash
+terraform -chdir=03-isv-routing destroy \
+  -input=true \
+  -no-color \
+  -var-file=demo.tfvars \
+  | tee "$EVIDENCE_DIR/negative-udr-destroy.txt"
+```
+
+Run customer-to-ISV traffic with the destination observer. Without the UDR,
+the result may be failed connectivity or a return path that bypasses the NVA.
+Compare the NVA counters with the earlier baseline to identify the result:
+
+```bash
+./scripts/test-connectivity.sh \
+  --direction customer-to-isv \
+  --source-bastion-name "$CUSTOMER_BASTION_NAME" \
+  --source-resource-group "$CUSTOMER_RESOURCE_GROUP" \
+  --source-vm-id "$CUSTOMER_WORKLOAD_VM_ID" \
+  --source-username "$CUSTOMER_ADMIN_USERNAME" \
+  --ssh-key "$SSH_KEY" \
+  --destination-ip "$ISV_WORKLOAD_PRIVATE_IP" \
+  --expected-source-ip "$CUSTOMER_WORKLOAD_PRIVATE_IP" \
+  --destination-bastion-name "$ISV_BASTION_NAME" \
+  --destination-resource-group "$ISV_RESOURCE_GROUP" \
+  --destination-vm-id "$ISV_WORKLOAD_VM_ID" \
+  --destination-username "$ISV_ADMIN_USERNAME" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  2>&1 | tee "$EVIDENCE_DIR/negative-udr-connectivity.txt" \
+  || printf 'Connectivity failure observed with the ISV route removed.\n'
+```
+
+Restore the route layer immediately:
+
+```bash
+terraform -chdir=03-isv-routing apply \
+  -input=true \
+  -no-color \
+  -var-file=demo.tfvars \
+  | tee "$EVIDENCE_DIR/negative-udr-restore.txt"
+```
+
+### Remove and restore the customer-managed ISV connection
+
+Destroy the connection layer:
+
+```bash
+terraform -chdir=04-customer-connection destroy \
+  -input=true \
+  -no-color \
+  -var-file=demo.tfvars \
+  | tee "$EVIDENCE_DIR/negative-connection-destroy.txt"
+```
+
+Confirm customer-to-ISV traffic no longer succeeds:
+
+```bash
+./scripts/test-connectivity.sh \
+  --direction customer-to-isv \
+  --source-bastion-name "$CUSTOMER_BASTION_NAME" \
+  --source-resource-group "$CUSTOMER_RESOURCE_GROUP" \
+  --source-vm-id "$CUSTOMER_WORKLOAD_VM_ID" \
+  --source-username "$CUSTOMER_ADMIN_USERNAME" \
+  --ssh-key "$SSH_KEY" \
+  --destination-ip "$ISV_WORKLOAD_PRIVATE_IP" \
+  --expected-source-ip "$CUSTOMER_WORKLOAD_PRIVATE_IP" \
+  --destination-bastion-name "$ISV_BASTION_NAME" \
+  --destination-resource-group "$ISV_RESOURCE_GROUP" \
+  --destination-vm-id "$ISV_WORKLOAD_VM_ID" \
+  --destination-username "$ISV_ADMIN_USERNAME" \
+  --subscription "$AZURE_SUBSCRIPTION" \
+  2>&1 | tee "$EVIDENCE_DIR/negative-connection-connectivity.txt" \
+  || printf 'Expected failure observed with the ISV connection removed.\n'
+```
+
+Restore the connection layer immediately:
+
+```bash
+terraform -chdir=04-customer-connection apply \
+  -input=true \
+  -no-color \
+  -var-file=demo.tfvars \
+  | tee "$EVIDENCE_DIR/negative-connection-restore.txt"
+```
+
+After either negative control, repeat sections 2 through 4 only after the hub
+routing state returns to `Provisioned`.
+
+## 7. Cleanup
+
+Keep the named evidence files until the results have been reviewed and
+archived. To destroy the deployed infrastructure, use reverse dependency order
+and review each interactive confirmation:
+
+```bash
+terraform -chdir=04-customer-connection destroy \
+  -input=true -var-file=demo.tfvars
+terraform -chdir=03-isv-routing destroy \
+  -input=true -var-file=demo.tfvars
+terraform -chdir=02-customer-core destroy \
+  -input=true -var-file=demo.tfvars
+terraform -chdir=01-isv-core destroy \
+  -input=true -var-file=demo.tfvars
+```
+
+Confirm that both resource groups and all billable Public IP, Bastion, disk,
+load-balancer, and Virtual WAN resources are gone. Remove local evidence only
+after it has been archived:
+
+```bash
+printf 'Evidence directory retained at: %s\n' "$EVIDENCE_DIR"
+rm -ri -- "$EVIDENCE_DIR"
+```

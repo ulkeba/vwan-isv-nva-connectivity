@@ -1,0 +1,12 @@
+[Unit]
+Description=NVA forwarding health probe socket
+Requires=nftables.service
+After=network-online.target nftables.service
+
+[Socket]
+ListenStream=0.0.0.0:${probe_port}
+Accept=no
+Service=forwarding-health.service
+
+[Install]
+WantedBy=sockets.target

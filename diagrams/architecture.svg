@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Azure Virtual WAN and ISV NVA transparent-routing demo</title>
+  <desc id="desc">Customer and ISV ownership, address spaces, Virtual WAN hub connections, NVA HA pair behind an internal load balancer, routes, Bastion access, and both source-preserving traffic paths.</desc>
+  <defs>
+    <marker id="blueArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#0078d4"/></marker>
+    <marker id="greenArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#4f8a10"/></marker>
+    <marker id="grayArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#555"/></marker>
+    <style>
+      text { font-family: Arial, sans-serif; fill: #1f1f1f }
+      .owner { stroke-width: 2; rx: 14 }
+      .box { fill: #fff; stroke-width: 2; rx: 9 }
+      .label { font-size: 14px; text-anchor: middle }
+      .small { font-size: 12px; text-anchor: middle }
+      .head { font-size: 16px; font-weight: bold; text-anchor: middle }
+      .pathBlue { fill: none; stroke: #0078d4; stroke-width: 4; marker-end: url(#blueArrow) }
+      .pathGreen { fill: none; stroke: #4f8a10; stroke-width: 4; marker-end: url(#greenArrow) }
+      .manage { fill: none; stroke: #795695; stroke-width: 2; stroke-dasharray: 7 5; marker-end: url(#grayArrow) }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="#fafafa"/>
+  <text x="800" y="37" font-size="25" font-weight="bold" text-anchor="middle">Azure Virtual WAN / ISV NVA transparent-routing demo</text>
+
+  <rect class="owner" x="25" y="70" width="890" height="770" fill="#eaf3fc" stroke="#6c8ebf"/>
+  <text class="head" x="470" y="98">CUSTOMER OWNERSHIP — 02-customer-core + 04-customer-connection</text>
+  <rect class="owner" x="935" y="70" width="640" height="770" fill="#edf8eb" stroke="#82b366"/>
+  <text class="head" x="1255" y="98">ISV OWNERSHIP — 01-isv-core + 03-isv-routing</text>
+
+  <rect class="box" x="560" y="120" width="240" height="65" fill="#fff2cc" stroke="#d6b656"/>
+  <text class="head" x="680" y="148">Azure Virtual WAN</text>
+  <text class="small" x="680" y="168">Customer core lifecycle</text>
+  <ellipse cx="800" cy="245" rx="145" ry="55" fill="#ffe6cc" stroke="#d79b00" stroke-width="2"/>
+  <text class="head" x="800" y="232">Virtual hub 10.0.0.0/23</text>
+  <text class="small" x="800" y="254">Associated + propagated hub route tables</text>
+  <text class="small" x="800" y="273">defaultRouteTable or customer-defined</text>
+  <path d="M680 185 L755 201" stroke="#d79b00" stroke-width="2" marker-end="url(#grayArrow)"/>
+
+  <rect class="box" x="60" y="180" width="450" height="500" fill="#fff" stroke="#6c8ebf"/>
+  <text class="head" x="285" y="207">Customer VNet 10.10.0.0/16</text>
+  <rect class="box" x="85" y="245" width="190" height="150" fill="#eef6fd" stroke="#6c8ebf"/>
+  <text class="label" x="180" y="270">Workload subnet</text>
+  <text class="label" x="180" y="290">10.10.1.0/24</text>
+  <rect class="box" x="112" y="315" width="136" height="55" fill="#fff" stroke="#0078d4"/>
+  <text class="label" x="180" y="338">Customer workload VM</text>
+  <text class="small" x="180" y="358">No public IP</text>
+  <rect class="box" x="85" y="485" width="190" height="105" fill="#eef6fd" stroke="#6c8ebf"/>
+  <text class="label" x="180" y="515">AzureBastionSubnet</text>
+  <text class="label" x="180" y="536">10.10.255.0/26</text>
+  <text class="small" x="180" y="564">Bastion Standard + public IP</text>
+  <text class="small" x="180" y="581">Native-client SSH tunnel</text>
+  <rect class="box" x="315" y="290" width="240" height="100" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text class="label" x="435" y="315">Customer workload connection</text>
+  <text class="small" x="435" y="337">Owned by 02-customer-core</text>
+  <text class="small" x="435" y="357">Association + propagation</text>
+  <text class="small" x="435" y="377">learn ISV static route</text>
+  <path d="M248 343 L315 343" stroke="#6c8ebf" stroke-width="2" marker-end="url(#grayArrow)"/>
+  <path d="M555 315 L686 270" stroke="#6c8ebf" stroke-width="3" marker-end="url(#grayArrow)"/>
+  <path class="manage" d="M180 485 L180 370"/>
+
+  <rect class="box" x="665" y="330" width="240" height="130" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text class="label" x="785" y="353">ISV hub connection (04)</text>
+  <text class="small" x="785" y="374">Customer-owned connection</text>
+  <text class="small" x="785" y="393">Static 10.100.1.0/24</text>
+  <text class="small" x="785" y="411">next hop 10.100.0.10</text>
+  <text class="small" x="785" y="429">Propagation enabled</text>
+  <text class="small" x="785" y="447">local override = Contains (no bypass)</text>
+  <path d="M800 300 L790 330" stroke="#6c8ebf" stroke-width="3" marker-end="url(#grayArrow)"/>
+
+  <rect class="box" x="1090" y="150" width="450" height="560" fill="#fff" stroke="#82b366"/>
+  <text class="head" x="1315" y="178">ISV VNet 10.100.0.0/16</text>
+  <rect class="box" x="1110" y="210" width="190" height="300" fill="#f2faef" stroke="#82b366"/>
+  <text class="label" x="1205" y="234">NVA subnet 10.100.0.0/24</text>
+  <text class="small" x="1205" y="253">No route-table association</text>
+  <rect class="box" x="1128" y="275" width="154" height="70" fill="#ffe6cc" stroke="#d79b00"/>
+  <text class="label" x="1205" y="297">Standard internal LB</text>
+  <text class="small" x="1205" y="316">HA Ports + Floating IP</text>
+  <text class="small" x="1205" y="333">Frontend 10.100.0.10</text>
+  <rect class="box" x="1122" y="380" width="78" height="95" fill="#f8cecc" stroke="#b85450"/>
+  <text class="label" x="1161" y="405">NVA 1</text>
+  <text class="small" x="1161" y="424">Zone 1</text>
+  <text class="small" x="1161" y="443">Forward</text>
+  <text class="small" x="1161" y="460">No SNAT</text>
+  <rect class="box" x="1210" y="380" width="78" height="95" fill="#f8cecc" stroke="#b85450"/>
+  <text class="label" x="1249" y="405">NVA 2</text>
+  <text class="small" x="1249" y="424">Zone 2</text>
+  <text class="small" x="1249" y="443">Forward</text>
+  <text class="small" x="1249" y="460">No SNAT</text>
+  <path d="M1175 345 L1162 380 M1235 345 L1248 380" stroke="#d79b00" stroke-width="2" marker-end="url(#grayArrow)"/>
+
+  <rect class="box" x="1320" y="210" width="195" height="180" fill="#f2faef" stroke="#82b366"/>
+  <text class="label" x="1417" y="236">ISV workload subnet</text>
+  <text class="label" x="1417" y="257">10.100.1.0/24</text>
+  <rect class="box" x="1348" y="288" width="140" height="60" fill="#fff" stroke="#107c10"/>
+  <text class="label" x="1418" y="312">ISV workload VM</text>
+  <text class="small" x="1418" y="334">No public IP</text>
+  <rect class="box" x="1308" y="430" width="220" height="95" fill="#fff2cc" stroke="#d6b656"/>
+  <text class="label" x="1418" y="453">Customer-specific UDR (03)</text>
+  <text class="small" x="1418" y="475">10.10.0.0/16 → Virtual appliance</text>
+  <text class="small" x="1418" y="494">next hop 10.100.0.10</text>
+  <text class="small" x="1418" y="512">Associated only to workload subnet</text>
+  <rect class="box" x="1120" y="570" width="380" height="90" fill="#f2faef" stroke="#82b366"/>
+  <text class="label" x="1310" y="598">AzureBastionSubnet 10.100.255.0/26</text>
+  <text class="small" x="1310" y="620">Bastion Standard + public IP</text>
+  <text class="small" x="1310" y="641">Native SSH to workload VM and both NVAs</text>
+  <path class="manage" d="M1285 570 L1248 475"/>
+  <path class="manage" d="M1375 570 L1410 348"/>
+
+  <path class="pathBlue" d="M248 328 C460 210, 620 210, 655 240"/>
+  <path class="pathBlue" d="M945 245 C1010 258, 1060 284, 1128 308"/>
+  <path class="pathBlue" d="M1205 345 L1205 378"/>
+  <path class="pathBlue" d="M1288 426 C1335 416, 1365 375, 1400 348"/>
+  <text x="535" y="205" font-size="13" fill="#0078d4">Customer → ISV: hub static route → ILB → healthy NVA → workload</text>
+
+  <path class="pathGreen" d="M1400 288 C1370 235, 1285 250, 1235 275"/>
+  <path class="pathGreen" d="M1160 380 C1060 320, 1020 270, 945 248"/>
+  <path class="pathGreen" d="M655 250 C520 270, 410 302, 248 340"/>
+  <text x="1000" y="545" font-size="13" fill="#4f8a10">ISV → customer: workload UDR → ILB → healthy NVA → hub-learned route</text>
+
+  <rect class="box" x="465" y="720" width="670" height="90" fill="#fff" stroke="#666"/>
+  <line x1="495" y1="746" x2="555" y2="746" stroke="#0078d4" stroke-width="4" marker-end="url(#blueArrow)"/>
+  <text x="570" y="751" font-size="13">Customer → ISV</text>
+  <line x1="745" y1="746" x2="805" y2="746" stroke="#4f8a10" stroke-width="4" marker-end="url(#greenArrow)"/>
+  <text x="820" y="751" font-size="13">ISV → customer</text>
+  <text class="label" x="800" y="785">Both independent paths traverse an ILB-selected healthy NVA and preserve the original workload source IP.</text>
+</svg>

@@ -1,0 +1,92 @@
+<mxfile host="app.diagrams.net" modified="2026-09-18T11:06:31.000Z" agent="GitHub Copilot" version="24.7.17" type="device">
+  <diagram id="ecs-vwan-fwaas" name="Architecture">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="Azure Virtual WAN / ISV NVA transparent-routing demo" style="text;html=1;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="350" y="20" width="900" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="customerOwner" value="CUSTOMER OWNERSHIP&#xa;02-customer-core + 04-customer-connection" style="swimlane;html=1;startSize=45;rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="30" y="90" width="900" height="750" as="geometry"/>
+        </mxCell>
+        <mxCell id="isvOwner" value="ISV OWNERSHIP&#xa;01-isv-core + 03-isv-routing" style="swimlane;html=1;startSize=45;rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="950" y="90" width="620" height="750" as="geometry"/>
+        </mxCell>
+        <mxCell id="vwan" value="Azure Virtual WAN" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="570" y="160" width="220" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="hub" value="Virtual hub&#xa;10.0.0.0/23&#xa;Default/custom hub route tables" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="660" y="290" width="280" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="customerVnet" value="Customer VNet 10.10.0.0/16" style="swimlane;html=1;startSize=32;rounded=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="70" y="300" width="440" height="440" as="geometry"/>
+        </mxCell>
+        <mxCell id="customerWorkloadSubnet" value="Workload subnet&#xa;10.10.1.0/24" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf2f8;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="390" width="180" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="customerVM" value="Customer workload VM&#xa;No public IP" style="shape=mxgraph.azure.compute.virtual_machine;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#0078d4;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="120" y="420" width="140" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="customerBastionSubnet" value="AzureBastionSubnet&#xa;10.10.255.0/26" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf2f8;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="100" y="570" width="180" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="customerBastion" value="Bastion Standard&#xa;Native SSH tunnel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="580" width="170" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="customerConnection" value="Customer workload hub connection&#xa;Owned by 02-customer-core&#xa;Associated/propagated route tables" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="340" y="300" width="250" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="isvVnet" value="ISV VNet 10.100.0.0/16" style="swimlane;html=1;startSize=32;rounded=1;fillColor=#ffffff;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="260" width="510" height="500" as="geometry"/>
+        </mxCell>
+        <mxCell id="nvaSubnet" value="NVA subnet&#xa;10.100.0.0/24&#xa;No UDR association" style="swimlane;html=1;startSize=50;rounded=1;fillColor=#f5fff3;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="340" width="220" height="260" as="geometry"/>
+        </mxCell>
+        <mxCell id="ilb" value="Standard internal LB&#xa;HA Ports + Floating IP&#xa;Frontend 10.100.0.10" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1070" y="400" width="180" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="nva1" value="NVA 1&#xa;Zone 1&#xa;IP forwarding / no SNAT" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="500" width="95" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="nva2" value="NVA 2&#xa;Zone 2&#xa;IP forwarding / no SNAT" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1165" y="500" width="95" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="isvWorkloadSubnet" value="ISV workload subnet&#xa;10.100.1.0/24" style="swimlane;html=1;startSize=50;rounded=1;fillColor=#f5fff3;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="340" width="200" height="190" as="geometry"/>
+        </mxCell>
+        <mxCell id="isvVM" value="ISV workload VM&#xa;No public IP" style="shape=mxgraph.azure.compute.virtual_machine;html=1;whiteSpace=wrap;fillColor=#ffffff;strokeColor=#107c10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1330" y="410" width="140" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="udr" value="Customer-specific UDR (03)&#xa;10.10.0.0/16 → Virtual appliance&#xa;10.100.0.10" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="550" width="230" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="isvBastionSubnet" value="AzureBastionSubnet&#xa;10.100.255.0/26" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5fff3;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="640" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="isvBastion" value="Bastion Standard&#xa;Native SSH to workload/NVAs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="660" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="isvConnection" value="ISV hub connection (04)&#xa;Customer-owned&#xa;Static route: 10.100.1.0/24&#xa;Next hop: 10.100.0.10&#xa;Propagation enabled; override = Contains" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="700" y="450" width="245" height="125" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend" value="Blue path: customer → ISV&#xa;Green path: ISV → customer&#xa;Both paths traverse ILB-selected healthy NVA; original source IP is preserved." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="520" y="690" width="460" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="edgeVwanHub" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#d79b00;" edge="1" parent="1" source="vwan" target="hub"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edgeCustomerConnection" value="VNet connection" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#6c8ebf;" edge="1" parent="1" source="customerWorkloadSubnet" target="customerConnection"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edgeCustomerHub" style="endArrow=block;startArrow=block;html=1;strokeWidth=2;strokeColor=#6c8ebf;" edge="1" parent="1" source="customerConnection" target="hub"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edgeHubIsv" style="endArrow=block;startArrow=block;html=1;strokeWidth=2;strokeColor=#6c8ebf;" edge="1" parent="1" source="hub" target="isvConnection"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edgeIsvConnIlb" value="Connection static next hop" style="endArrow=block;html=1;strokeWidth=3;strokeColor=#0078d4;" edge="1" parent="1" source="isvConnection" target="ilb"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edgeIlbNva1" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#d79b00;" edge="1" parent="1" source="ilb" target="nva1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edgeIlbNva2" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#d79b00;" edge="1" parent="1" source="ilb" target="nva2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edgeNvaIsv" value="Forwarded without SNAT" style="endArrow=block;html=1;strokeWidth=3;strokeColor=#0078d4;" edge="1" parent="1" source="nva2" target="isvVM"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edgeIsvUdr" value="Return-path UDR" style="endArrow=block;html=1;strokeWidth=3;strokeColor=#82b366;" edge="1" parent="1" source="isvVM" target="ilb"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edgeNvaHub" value="Hub-learned customer route; no SNAT" style="endArrow=block;html=1;strokeWidth=3;strokeColor=#82b366;" edge="1" parent="1" source="nva1" target="hub"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edgeCustomerBastion" value="SSH" style="endArrow=open;html=1;dashed=1;strokeColor=#9673a6;" edge="1" parent="1" source="customerBastion" target="customerVM"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edgeIsvBastionWorkload" value="SSH" style="endArrow=open;html=1;dashed=1;strokeColor=#9673a6;" edge="1" parent="1" source="isvBastion" target="isvVM"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edgeIsvBastionNva" value="SSH" style="endArrow=open;html=1;dashed=1;strokeColor=#9673a6;" edge="1" parent="1" source="isvBastion" target="nva2"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
