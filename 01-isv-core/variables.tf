@@ -3,34 +3,15 @@ variable "location" {
   type        = string
 }
 
-variable "resource_group_name" {
-  description = "Name of the ISV resource group."
+variable "isv_prefix" {
+  description = "Prefix used to derive all ISV resource names."
   type        = string
-}
+  default     = "fd-isv"
 
-variable "virtual_network_name" {
-  description = "Name of the ISV virtual network."
-  type        = string
-}
-
-variable "nva_subnet_name" {
-  description = "Name of the NVA subnet."
-  type        = string
-}
-
-variable "workload_subnet_name" {
-  description = "Name of the ISV workload subnet."
-  type        = string
-}
-
-variable "nva_name_prefix" {
-  description = "Name prefix for NVA cluster resources."
-  type        = string
-}
-
-variable "nva_network_security_group_name" {
-  description = "Name of the NVA network security group."
-  type        = string
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]*[a-z0-9]$", var.isv_prefix))
+    error_message = "isv_prefix must contain only lowercase letters, numbers, and internal hyphens."
+  }
 }
 
 variable "nva_vm_size" {
@@ -38,27 +19,7 @@ variable "nva_vm_size" {
   type        = string
 }
 
-variable "workload_vm_name" {
-  description = "Name of the ISV workload test VM."
-  type        = string
-}
-
-variable "workload_network_security_group_name" {
-  description = "Name of the workload VM network security group."
-  type        = string
-}
-
 variable "workload_vm_size" {
   description = "Azure VM size for the workload test VM."
-  type        = string
-}
-
-variable "bastion_name" {
-  description = "Name of the Azure Bastion host."
-  type        = string
-}
-
-variable "bastion_public_ip_name" {
-  description = "Name of the public IP used only by Azure Bastion."
   type        = string
 }

@@ -3,17 +3,13 @@ variable "location" {
   type        = string
 }
 
-variable "resource_group_name" {
-  description = "Name of the existing ISV resource group."
+variable "isv_prefix" {
+  description = "Prefix used to derive ISV network resource names."
   type        = string
-}
+  default     = "fd-isv"
 
-variable "route_table_name" {
-  description = "Name of the customer-specific ISV route table."
-  type        = string
-}
-
-variable "route_name" {
-  description = "Name of the route to the customer network."
-  type        = string
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]*[a-z0-9]$", var.isv_prefix))
+    error_message = "isv_prefix must contain only lowercase letters, numbers, and internal hyphens."
+  }
 }

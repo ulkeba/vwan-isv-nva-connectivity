@@ -1,0 +1,8 @@
+#cloud-config
+package_update: true
+packages:
+  - iputils-ping
+  - net-tools
+  - netcat-openbsd
+  - python3
+  - tcpdump

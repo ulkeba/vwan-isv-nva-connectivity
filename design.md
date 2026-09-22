@@ -22,6 +22,7 @@ Terraform deploys the infrastructure. Cloud-init and systemd configure the Linux
 - One customer workload VNet connected to the virtual hub.
 - One ISV VNet with a workload subnet, an NVA subnet, and two zonal Linux forwarding VMs.
 - A Standard internal load balancer with an HA Ports rule as the stable NVA next hop.
+- One public IP per NVA for NVA-originated outbound connectivity.
 - Transparent routing without SNAT for traffic initiated in either direction.
 - Azure Bastion Standard with native SSH connectivity for each core VNet.
 - Four Terraform roots with separate state and ownership.
@@ -29,7 +30,7 @@ Terraform deploys the infrastructure. Cloud-init and systemd configure the Linux
 
 ### Out of scope
 
-- Routing Intent, Azure Firewall, hub-integrated NVAs, ExpressRoute, VPN, internet egress routing, multi-hub routing, IPv6, DNS integration, and firewall inspection rules.
+- Routing Intent, Azure Firewall, hub-integrated NVAs, ExpressRoute, VPN, workload internet egress routing, multi-hub routing, IPv6, DNS integration, and firewall inspection rules.
 - VM scale sets, autoscaling, production hardening, patch management, and stateful firewall failover.
 - Cross-tenant authorization automation. The deployment identity must already have access to the required subscriptions.
 
@@ -184,6 +185,8 @@ Tests must prove both directions independently. Connectivity alone does not prov
 |   |-- providers.tf
 |   |-- validations.tf
 |   `-- variables.tf
+|-- cloud-init/
+|   `-- testing-tools.yaml
 |-- scripts/
 |   |-- show-effective-routes.sh
 |   |-- show-nva-counters.sh
@@ -200,8 +203,8 @@ Each numbered directory is a Terraform root with a separate backend key and lock
 
 | Root | Owner | Resources |
 |---|---|---|
-| `01-isv-core` | ISV | Resource group, VNet, subnets, NSGs, Bastion, NVA VMs/NICs, load balancer, ISV workload VM |
-| `02-customer-core` | Customer | Resource group, Virtual WAN, virtual hub, customer VNet, subnets, NSGs, Bastion, customer workload VM, customer workload connection |
+| `01-isv-core` | ISV | Network, workload, and Bastion resource groups; VNet/subnets/NSGs; NVA cluster; test workload; Bastion |
+| `02-customer-core` | Customer | Network, workload, and Bastion resource groups; Virtual WAN/hub; VNet/subnets/NSGs; test workload; Bastion; workload connection |
 | `03-isv-routing` | ISV | Customer-specific route table, route, and ISV workload-subnet association |
 | `04-customer-connection` | Customer | ISV virtual hub connection and connection-level routing |
 
@@ -224,6 +227,17 @@ No Azure resource may be managed by more than one state file.
 - associated and propagated hub route-table configuration.
 
 CIDR and IP variables are required and have no default values. Commands use `-input=false -var-file=demo.tfvars` so missing values fail visibly.
+
+Resource names derive from two optional variables with defaults: `isv_prefix = "fd-isv"` and `customer_prefix = "fd-customer"`. Role components (`network`, `workload`, and `bastion`) and resource-type suffixes are fixed in the configuration. Individual resource names are not inputs.
+
+An override is a cross-root contract: roots 01 and 03 must receive the same `isv_prefix`, and roots 02 and 04 must receive the same `customer_prefix`.
+
+NSG and route-table ownership is:
+
+- `fd-isv-network-rg`: NVA, workload-subnet, and Bastion-subnet NSGs; customer route table and route.
+- `fd-customer-network-rg`: workload-subnet and Bastion-subnet NSGs.
+- Workload and Bastion resource groups contain no NSGs or route tables.
+- Customer-side routing remains on Virtual Hub connections and Virtual Hub-managed route tables rather than a standalone route table.
 
 ### Outputs
 
@@ -248,8 +262,9 @@ Only outputs needed by another root or by verification scripts are required. Do 
 - Use a pinned Terraform version and pinned `azurerm` provider; commit dependency lock files.
 - Use `azurerm_virtual_hub_connection` for static routes, propagation, association, and `static_vnet_local_route_override_criteria`. AzAPI is not required.
 - Authenticate locally with Azure CLI.
-- Require subscription IDs, region, resource names, CIDRs, fixed IPs, VM size, zones, and admin username as inputs.
-- Put demo values in `demo.tfvars`, not variable defaults.
+- Require subscription IDs, region, CIDRs, fixed IPs, VM size, zones, and admin username as inputs.
+- Derive resource names from the optional `isv_prefix` and `customer_prefix` variables, whose defaults group the demo resources together in the portal.
+- Put deployment-specific demo values in `demo.tfvars`; keep the two naming-prefix defaults in `variables.tf`.
 - Keep cross-input consistency checks in `validations.tf`.
 - Use SSH public-key authentication and disable passwords.
 - Do not assign public IPs to VMs.
@@ -325,7 +340,7 @@ Destroy in this order:
 3. `02-customer-core`
 4. `01-isv-core`
 
-Verify that no resource groups, Bastion public IPs, disks, or other billable resources remain.
+Verify that none of the six resource groups, Bastion public IPs, disks, or other billable resources remain.
 
 ## 13. Definition of done
 

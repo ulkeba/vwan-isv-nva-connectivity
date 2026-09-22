@@ -1,5 +1,9 @@
+locals {
+  network_prefix = "${var.customer_prefix}-network"
+}
+
 resource "azurerm_virtual_hub_connection" "isv" {
-  name                      = var.isv_hub_connection_name
+  name                      = "${local.network_prefix}-isv-conn"
   virtual_hub_id            = var.virtual_hub_id
   remote_virtual_network_id = var.isv_virtual_network_id
 
@@ -14,7 +18,7 @@ resource "azurerm_virtual_hub_connection" "isv" {
     }
 
     static_vnet_route {
-      name                = var.static_route_name
+      name                = "${local.network_prefix}-isv-workload-route"
       address_prefixes    = [var.isv_workload_address_prefix]
       next_hop_ip_address = var.nva_load_balancer_frontend_ip_address
     }

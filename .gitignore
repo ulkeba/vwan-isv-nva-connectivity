@@ -35,7 +35,7 @@ local.tfvars.json
 *.auto.tfvars.json
 
 # Verification output
-evidence/
+evidence*/
 
 # Local environment and credential files
 .env

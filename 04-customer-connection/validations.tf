@@ -52,8 +52,8 @@ resource "terraform_data" "input_validation" {
     }
 
     precondition {
-      condition     = trimspace(var.isv_hub_connection_name) != "" && trimspace(var.static_route_name) != ""
-      error_message = "Connection and static route names must not be empty."
+      condition     = trimspace(var.customer_prefix) != ""
+      error_message = "customer_prefix must not be empty."
     }
   }
 }

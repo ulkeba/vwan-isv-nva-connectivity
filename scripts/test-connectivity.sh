@@ -18,6 +18,7 @@ Optional definitive source-preservation observer (all four are required together
 Without destination observer arguments, the script proves bidirectional ICMP/TCP
 reachability and records the expected source. With them, a one-shot TCP observer
 on the destination reports and verifies the source address it actually sees.
+The default raw TCP test port is 2000.
 EOF
 }
 
@@ -34,7 +35,7 @@ source_username=
 ssh_key=
 destination_ip=
 expected_source_ip=
-tcp_port=8080
+tcp_port=2000
 subscription=
 local_port=52022
 destination_bastion_name=
@@ -120,14 +121,14 @@ az_common=(--only-show-errors)
 ssh_common=(-i "$ssh_key" -o BatchMode=yes -o ConnectTimeout=10 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$known_hosts_file")
 
 if [[ -z $expected_source_ip ]]; then
-  expected_source_ip=$(az vm show -d --ids "$source_vm_id" "${az_common[@]}" --query privateIps -o tsv)
+  expected_source_ip=$(az vm show -d --ids "$source_vm_id" --only-show-errors --query privateIps -o tsv)
   expected_source_ip=${expected_source_ip%%,*}
   [[ -n $expected_source_ip ]] || die "could not determine source VM private IP; pass --expected-source-ip"
 fi
 
 open_tunnel() {
   local bastion=$1 group=$2 vm_id=$3 port=$4 label=$5
-  local log="${XDG_RUNTIME_DIR:-$HOME/.cache}/ecs-vwan-fwaas-$label-$BASHPID.log"
+  local log="${XDG_RUNTIME_DIR:-$HOME/.cache}/fd-fwaas-$label-$BASHPID.log"
   local attempt
 
   mkdir -p "${log%/*}"

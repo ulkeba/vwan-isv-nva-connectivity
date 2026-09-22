@@ -7,7 +7,7 @@ output "isv_hub_connection" {
     propagated_route_table_ids    = var.propagated_route_table_ids
     propagated_route_table_labels = var.propagated_route_table_labels
     static_route = {
-      name                = var.static_route_name
+      name                = "${local.network_prefix}-isv-workload-route"
       address_prefixes    = [var.isv_workload_address_prefix]
       next_hop_ip_address = var.nva_load_balancer_frontend_ip_address
     }

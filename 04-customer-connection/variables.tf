@@ -3,9 +3,15 @@ variable "subscription_id" {
   type        = string
 }
 
-variable "isv_hub_connection_name" {
-  description = "Name of the ISV VNet-to-hub connection."
+variable "customer_prefix" {
+  description = "Prefix used to derive customer network resource names."
   type        = string
+  default     = "fd-customer"
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]*[a-z0-9]$", var.customer_prefix))
+    error_message = "customer_prefix must contain only lowercase letters, numbers, and internal hyphens."
+  }
 }
 
 variable "virtual_hub_id" {
@@ -25,11 +31,6 @@ variable "isv_workload_address_prefix" {
 
 variable "nva_load_balancer_frontend_ip_address" {
   description = "Private frontend IP of the ISV NVA load balancer."
-  type        = string
-}
-
-variable "static_route_name" {
-  description = "Name of the connection-level static route."
   type        = string
 }
 

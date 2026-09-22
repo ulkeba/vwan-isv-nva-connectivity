@@ -1,3 +1,21 @@
+output "isv_resource_groups" {
+  description = "ISV resource groups by role."
+  value = {
+    network = {
+      id   = azurerm_resource_group.network.id
+      name = azurerm_resource_group.network.name
+    }
+    workload = {
+      id   = azurerm_resource_group.workload.id
+      name = azurerm_resource_group.workload.name
+    }
+    bastion = {
+      id   = azurerm_resource_group.bastion.id
+      name = azurerm_resource_group.bastion.name
+    }
+  }
+}
+
 output "isv_virtual_network" {
   description = "ISV virtual network details for onboarding."
   value = {
@@ -44,8 +62,9 @@ output "isv_workload_virtual_machine" {
 output "isv_bastion" {
   description = "Azure Bastion details used for native-client SSH."
   value = {
-    id       = azurerm_bastion_host.this.id
-    name     = azurerm_bastion_host.this.name
-    dns_name = azurerm_bastion_host.this.dns_name
+    id             = azurerm_bastion_host.this.id
+    name           = azurerm_bastion_host.this.name
+    resource_group = azurerm_bastion_host.this.resource_group_name
+    dns_name       = azurerm_bastion_host.this.dns_name
   }
 }

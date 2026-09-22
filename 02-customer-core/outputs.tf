@@ -1,9 +1,18 @@
-output "customer_resource_group" {
-  description = "Customer resource group details."
+output "customer_resource_groups" {
+  description = "Customer resource groups by role."
   value = {
-    id       = azurerm_resource_group.customer.id
-    name     = azurerm_resource_group.customer.name
-    location = azurerm_resource_group.customer.location
+    network = {
+      id   = azurerm_resource_group.network.id
+      name = azurerm_resource_group.network.name
+    }
+    workload = {
+      id   = azurerm_resource_group.workload.id
+      name = azurerm_resource_group.workload.name
+    }
+    bastion = {
+      id   = azurerm_resource_group.bastion.id
+      name = azurerm_resource_group.bastion.name
+    }
   }
 }
 
@@ -58,9 +67,10 @@ output "customer_workload_virtual_machine" {
 output "customer_bastion" {
   description = "Customer Bastion details used for native SSH."
   value = {
-    id       = azurerm_bastion_host.customer.id
-    name     = azurerm_bastion_host.customer.name
-    dns_name = azurerm_bastion_host.customer.dns_name
+    id             = azurerm_bastion_host.customer.id
+    name           = azurerm_bastion_host.customer.name
+    resource_group = azurerm_bastion_host.customer.resource_group_name
+    dns_name       = azurerm_bastion_host.customer.dns_name
   }
 }
 

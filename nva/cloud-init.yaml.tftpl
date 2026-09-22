@@ -1,7 +1,6 @@
 #cloud-config
 package_update: true
-packages:
-  - nftables
+packages: ${jsonencode(packages)}
 
 write_files:
   - path: /etc/sysctl.d/99-nva-forwarding.conf

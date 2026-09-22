@@ -17,6 +17,7 @@ output "virtual_machines" {
       zone       = azurerm_linux_virtual_machine.this[key].zone
       nic_id     = azurerm_network_interface.this[key].id
       private_ip = azurerm_network_interface.this[key].private_ip_address
+      public_ip  = azurerm_public_ip.this[key].ip_address
     }
   }
 }

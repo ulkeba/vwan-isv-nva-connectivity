@@ -10,12 +10,16 @@ The solution has four independent Terraform roots and four independent local sta
 
 | Root | Owner | Responsibility |
 |---|---|---|
-| `01-isv-core` | ISV | ISV VNet, Bastion, workload VM, NVA pair, and internal HA Ports load balancer |
-| `02-customer-core` | Customer | Virtual WAN/hub, customer VNet, Bastion, workload VM, and customer workload connection |
+| `01-isv-core` | ISV | Three resource groups containing the ISV network/NVA, test workload, and Bastion resources |
+| `02-customer-core` | Customer | Three resource groups containing Virtual WAN/network, test workload, and Bastion resources |
 | `03-isv-routing` | ISV | Customer-specific UDR and ISV workload-subnet association |
 | `04-customer-connection` | Customer | ISV hub connection and connection-level static routing |
 
 No Azure resource is managed by more than one root. Cross-root values are copied explicitly from structured Terraform outputs; the roots do not read each other's state.
+
+Names derive from two optional prefixes: `isv_prefix = "fd-isv"` and `customer_prefix = "fd-customer"`. Fixed role components and Azure type abbreviations produce names such as `fd-isv-network-rg`, `fd-isv-workload-vm`, and `fd-customer-bastion-bas`. `AzureBastionSubnet` is the only naming exception because Azure requires that exact subnet name.
+
+All NSGs live in the network resource groups and are associated with subnets. The ISV customer route table also lives in `fd-isv-network-rg`; customer-side routes remain on Virtual Hub connections and Virtual Hub-managed route tables.
 
 See [architecture.svg](diagrams/architecture.svg) for the rendered topology and [architecture.drawio](diagrams/architecture.drawio) for the editable source. Implementation decisions and current status are recorded in [implementation-log.md](docs/implementation-log.md).
 
@@ -31,17 +35,17 @@ See [architecture.svg](diagrams/architecture.svg) for the rendered topology and 
 - A local Ed25519 SSH key. The demo configuration expects:
 
   ```bash
-  ~/.ssh/ecs-vwan-fwaas-demo
-  ~/.ssh/ecs-vwan-fwaas-demo.pub
+  ~/.ssh/fd-fwaas-demo
+  ~/.ssh/fd-fwaas-demo.pub
   ```
 
   Generate it if needed:
 
   ```bash
   install -d -m 700 ~/.ssh
-  ssh-keygen -t ed25519 -f ~/.ssh/ecs-vwan-fwaas-demo -C ecs-vwan-fwaas-demo
-  chmod 600 ~/.ssh/ecs-vwan-fwaas-demo
-  chmod 644 ~/.ssh/ecs-vwan-fwaas-demo.pub
+  ssh-keygen -t ed25519 -f ~/.ssh/fd-fwaas-demo -C fd-fwaas-demo
+  chmod 600 ~/.ssh/fd-fwaas-demo
+  chmod 644 ~/.ssh/fd-fwaas-demo.pub
   ```
 
 The checked-in demo values target Sweden Central and use:
@@ -83,7 +87,7 @@ Also inspect branch prefixes and effective hub routes in the target Virtual WAN.
 
 ## Configure inputs
 
-Each root contains a `demo.tfvars` with non-secret demo values. Set the same subscription ID in every file and review all names, prefixes, VM sizes, zones, usernames, and the SSH public-key path.
+Each root contains a `demo.tfvars` with non-secret demo values. Set the same subscription ID in every file and review address prefixes, VM sizes, zones, usernames, the SSH public-key path, and copied cross-root IDs. Resource names are derived from the optional `isv_prefix` and `customer_prefix` variables and do not need to be listed in `demo.tfvars`. If overriding a prefix, use the same `isv_prefix` in roots 01 and 03 and the same `customer_prefix` in roots 02 and 04.
 
 Local state is intentional. Keep each root's `.terraform` directory and state files until its resources are destroyed. Never commit state or plan files.
 
@@ -190,7 +194,7 @@ Then verify that no billable resources remain:
 
 ```bash
 az group list \
-  --query "[?contains(name, 'vwan') || contains(name, 'nva')].{name:name,state:properties.provisioningState}" \
+  --query "[?starts_with(name, 'fd-isv-') || starts_with(name, 'fd-customer-')].{name:name,state:properties.provisioningState}" \
   -o table
 ```
 

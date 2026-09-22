@@ -8,19 +8,15 @@ variable "location" {
   type        = string
 }
 
-variable "resource_group_name" {
-  description = "Name of the customer resource group."
+variable "customer_prefix" {
+  description = "Prefix used to derive all customer resource names."
   type        = string
-}
+  default     = "fd-customer"
 
-variable "virtual_wan_name" {
-  description = "Name of the Standard Virtual WAN."
-  type        = string
-}
-
-variable "virtual_hub_name" {
-  description = "Name of the Virtual WAN hub."
-  type        = string
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]*[a-z0-9]$", var.customer_prefix))
+    error_message = "customer_prefix must contain only lowercase letters, numbers, and internal hyphens."
+  }
 }
 
 variable "virtual_hub_address_prefix" {
@@ -28,18 +24,8 @@ variable "virtual_hub_address_prefix" {
   type        = string
 }
 
-variable "customer_virtual_network_name" {
-  description = "Name of the customer virtual network."
-  type        = string
-}
-
 variable "customer_virtual_network_address_space" {
   description = "Address space assigned to the customer virtual network."
-  type        = string
-}
-
-variable "customer_workload_subnet_name" {
-  description = "Name of the customer workload subnet."
   type        = string
 }
 
@@ -55,16 +41,6 @@ variable "customer_bastion_subnet_prefix" {
 
 variable "isv_workload_address_prefix" {
   description = "ISV workload prefix permitted by the customer workload NSG."
-  type        = string
-}
-
-variable "customer_workload_network_security_group_name" {
-  description = "Name of the customer workload network security group."
-  type        = string
-}
-
-variable "customer_workload_vm_name" {
-  description = "Name of the customer workload virtual machine."
   type        = string
 }
 
@@ -90,20 +66,5 @@ variable "customer_workload_ssh_public_key_path" {
 
 variable "customer_workload_zone" {
   description = "Availability zone for the customer workload VM."
-  type        = string
-}
-
-variable "customer_bastion_public_ip_name" {
-  description = "Name of the customer Bastion public IP."
-  type        = string
-}
-
-variable "customer_bastion_name" {
-  description = "Name of the customer Bastion host."
-  type        = string
-}
-
-variable "customer_workload_connection_name" {
-  description = "Name of the customer workload VNet-to-hub connection."
   type        = string
 }

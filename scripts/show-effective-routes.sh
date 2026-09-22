@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 Usage:
   show-effective-routes.sh --virtual-hub-id ID --customer-nic-id ID \
-    --isv-nic-id ID --nva-nic-id ID [--subscription ID_OR_NAME]
+    --isv-nic-id ID --nva-nic-id ID
 
 Shows the Virtual WAN hub and workload/NVA NIC effective routes. Azure CLI
 authentication and Reader access to all supplied resources are required.
@@ -21,18 +21,16 @@ virtual_hub_id=
 customer_nic_id=
 isv_nic_id=
 nva_nic_id=
-subscription=
 
 while (($#)); do
   case "$1" in
-    --virtual-hub-id|--customer-nic-id|--isv-nic-id|--nva-nic-id|--subscription)
+    --virtual-hub-id|--customer-nic-id|--isv-nic-id|--nva-nic-id)
       (($# >= 2)) || die "$1 requires a value"
       case "$1" in
         --virtual-hub-id) virtual_hub_id=$2 ;;
         --customer-nic-id) customer_nic_id=$2 ;;
         --isv-nic-id) isv_nic_id=$2 ;;
         --nva-nic-id) nva_nic_id=$2 ;;
-        --subscription) subscription=$2 ;;
       esac
       shift 2
       ;;
@@ -50,9 +48,6 @@ command -v az >/dev/null 2>&1 || die "Azure CLI (az) is not installed"
 az account show --only-show-errors -o none >/dev/null 2>&1 ||
   die "Azure CLI is not authenticated; run 'az login'"
 
-az_common=(--only-show-errors)
-[[ -n $subscription ]] && az_common+=(--subscription "$subscription")
-
 printf 'Evidence timestamp (UTC): %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 printf 'Virtual hub: %s\n\n' "$virtual_hub_id"
 
@@ -61,7 +56,7 @@ az network vhub get-effective-routes \
   --ids "$virtual_hub_id" \
   --resource-type RouteTable \
   --resource-id "${virtual_hub_id}/hubRouteTables/defaultRouteTable" \
-  "${az_common[@]}" \
+  --only-show-errors \
   --query "value[].{Prefix:join(',', addressPrefixes),NextHopType:nextHopType,NextHops:join(',', nextHops),RouteOrigin:routeOrigin}" \
   -o table ||
   die "could not retrieve virtual hub effective routes (the hub may still be converging)"
@@ -74,7 +69,7 @@ show_nic_routes() {
   printf 'NIC: %s\n' "$nic_id"
   az network nic show-effective-route-table \
     --ids "$nic_id" \
-    "${az_common[@]}" \
+    --only-show-errors \
     --query "value[].{Prefix:join(',', addressPrefix),NextHopType:nextHopType,NextHopIp:join(',', nextHopIpAddress),Source:source,State:state}" \
     -o table ||
     die "could not retrieve effective routes for $label NIC"

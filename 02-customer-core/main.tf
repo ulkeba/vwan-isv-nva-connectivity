@@ -1,21 +1,41 @@
-resource "azurerm_resource_group" "customer" {
-  name     = var.resource_group_name
+locals {
+  network_prefix  = "${var.customer_prefix}-network"
+  workload_prefix = "${var.customer_prefix}-workload"
+  bastion_prefix  = "${var.customer_prefix}-bastion"
+}
+
+resource "azurerm_resource_group" "network" {
+  name     = "${local.network_prefix}-rg"
+  location = var.location
+
+  depends_on = [terraform_data.input_validation]
+}
+
+resource "azurerm_resource_group" "workload" {
+  name     = "${local.workload_prefix}-rg"
+  location = var.location
+
+  depends_on = [terraform_data.input_validation]
+}
+
+resource "azurerm_resource_group" "bastion" {
+  name     = "${local.bastion_prefix}-rg"
   location = var.location
 
   depends_on = [terraform_data.input_validation]
 }
 
 resource "azurerm_virtual_wan" "customer" {
-  name                = var.virtual_wan_name
-  resource_group_name = azurerm_resource_group.customer.name
-  location            = azurerm_resource_group.customer.location
+  name                = "${local.network_prefix}-vwan"
+  resource_group_name = azurerm_resource_group.network.name
+  location            = azurerm_resource_group.network.location
   type                = "Standard"
 }
 
 resource "azurerm_virtual_hub" "customer" {
-  name                = var.virtual_hub_name
-  resource_group_name = azurerm_resource_group.customer.name
-  location            = azurerm_resource_group.customer.location
+  name                = "${local.network_prefix}-vhub"
+  resource_group_name = azurerm_resource_group.network.name
+  location            = azurerm_resource_group.network.location
   virtual_wan_id      = azurerm_virtual_wan.customer.id
   address_prefix      = var.virtual_hub_address_prefix
   sku                 = "Standard"
@@ -29,30 +49,30 @@ resource "azurerm_virtual_hub" "customer" {
 }
 
 resource "azurerm_virtual_network" "customer" {
-  name                = var.customer_virtual_network_name
-  resource_group_name = azurerm_resource_group.customer.name
-  location            = azurerm_resource_group.customer.location
+  name                = "${local.network_prefix}-vnet"
+  resource_group_name = azurerm_resource_group.network.name
+  location            = azurerm_resource_group.network.location
   address_space       = [var.customer_virtual_network_address_space]
 }
 
 resource "azurerm_subnet" "workload" {
-  name                 = var.customer_workload_subnet_name
-  resource_group_name  = azurerm_resource_group.customer.name
+  name                 = "${local.network_prefix}-workload-snet"
+  resource_group_name  = azurerm_resource_group.network.name
   virtual_network_name = azurerm_virtual_network.customer.name
   address_prefixes     = [var.customer_workload_subnet_prefix]
 }
 
 resource "azurerm_subnet" "bastion" {
   name                 = "AzureBastionSubnet"
-  resource_group_name  = azurerm_resource_group.customer.name
+  resource_group_name  = azurerm_resource_group.network.name
   virtual_network_name = azurerm_virtual_network.customer.name
   address_prefixes     = [var.customer_bastion_subnet_prefix]
 }
 
 resource "azurerm_network_security_group" "workload" {
-  name                = var.customer_workload_network_security_group_name
-  resource_group_name = azurerm_resource_group.customer.name
-  location            = azurerm_resource_group.customer.location
+  name                = "${local.network_prefix}-workload-nsg"
+  resource_group_name = azurerm_resource_group.network.name
+  location            = azurerm_resource_group.network.location
 
   security_rule {
     name                       = "AllowSshFromBastion"
@@ -79,17 +99,124 @@ resource "azurerm_network_security_group" "workload" {
   }
 }
 
+resource "azurerm_network_security_group" "bastion" {
+  name                = "${local.network_prefix}-bastion-nsg"
+  resource_group_name = azurerm_resource_group.network.name
+  location            = azurerm_resource_group.network.location
+
+  security_rule {
+    name                       = "AllowGatewayManagerInbound"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "GatewayManager"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowAzureLoadBalancerInbound"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "AzureLoadBalancer"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowHttpsInbound"
+    priority                   = 120
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "Internet"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowBastionHostCommunicationInbound"
+    priority                   = 130
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_ranges    = ["8080", "5701"]
+    source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = "VirtualNetwork"
+  }
+
+  security_rule {
+    name                       = "AllowSshRdpOutbound"
+    priority                   = 100
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_ranges    = ["22", "3389"]
+    source_address_prefix      = "*"
+    destination_address_prefix = "VirtualNetwork"
+  }
+
+  security_rule {
+    name                       = "AllowAzureCloudOutbound"
+    priority                   = 110
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "*"
+    destination_address_prefix = "AzureCloud"
+  }
+
+  security_rule {
+    name                       = "AllowBastionHostCommunicationOutbound"
+    priority                   = 120
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_ranges    = ["8080", "5701"]
+    source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = "VirtualNetwork"
+  }
+
+  security_rule {
+    name                       = "AllowHttpOutbound"
+    priority                   = 130
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "80"
+    source_address_prefix      = "*"
+    destination_address_prefix = "Internet"
+  }
+}
+
 resource "azurerm_subnet_network_security_group_association" "workload" {
   subnet_id                 = azurerm_subnet.workload.id
   network_security_group_id = azurerm_network_security_group.workload.id
 }
 
+resource "azurerm_subnet_network_security_group_association" "bastion" {
+  subnet_id                 = azurerm_subnet.bastion.id
+  network_security_group_id = azurerm_network_security_group.bastion.id
+}
+
 module "customer_workload_vm" {
   source = "../modules/linux-test-vm"
 
-  name                      = var.customer_workload_vm_name
-  location                  = azurerm_resource_group.customer.location
-  resource_group_name       = azurerm_resource_group.customer.name
+  name                      = "${local.workload_prefix}-vm"
+  location                  = azurerm_resource_group.workload.location
+  resource_group_name       = azurerm_resource_group.workload.name
   subnet_id                 = azurerm_subnet.workload.id
   network_security_group_id = null
   private_ip_address        = var.customer_workload_private_ip_address
@@ -97,13 +224,13 @@ module "customer_workload_vm" {
   admin_username            = var.customer_workload_admin_username
   ssh_public_key            = file(pathexpand(var.customer_workload_ssh_public_key_path))
   zone                      = var.customer_workload_zone
-  custom_data               = null
+  custom_data               = file("${path.module}/../cloud-init/testing-tools.yaml")
 }
 
 resource "azurerm_public_ip" "bastion" {
-  name                = var.customer_bastion_public_ip_name
-  resource_group_name = azurerm_resource_group.customer.name
-  location            = azurerm_resource_group.customer.location
+  name                = "${local.bastion_prefix}-pip"
+  resource_group_name = azurerm_resource_group.bastion.name
+  location            = azurerm_resource_group.bastion.location
   allocation_method   = "Static"
   sku                 = "Standard"
 
@@ -113,9 +240,9 @@ resource "azurerm_public_ip" "bastion" {
 }
 
 resource "azurerm_bastion_host" "customer" {
-  name                = var.customer_bastion_name
-  resource_group_name = azurerm_resource_group.customer.name
-  location            = azurerm_resource_group.customer.location
+  name                = "${local.bastion_prefix}-bas"
+  resource_group_name = azurerm_resource_group.bastion.name
+  location            = azurerm_resource_group.bastion.location
   sku                 = "Standard"
   tunneling_enabled   = true
 
@@ -124,10 +251,12 @@ resource "azurerm_bastion_host" "customer" {
     subnet_id            = azurerm_subnet.bastion.id
     public_ip_address_id = azurerm_public_ip.bastion.id
   }
+
+  depends_on = [azurerm_subnet_network_security_group_association.bastion]
 }
 
 resource "azurerm_virtual_hub_connection" "customer_workload" {
-  name                      = var.customer_workload_connection_name
+  name                      = "${local.network_prefix}-workload-conn"
   virtual_hub_id            = azurerm_virtual_hub.customer.id
   remote_virtual_network_id = azurerm_virtual_network.customer.id
 

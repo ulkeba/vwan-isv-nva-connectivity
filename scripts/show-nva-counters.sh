@@ -108,7 +108,7 @@ for index in "${!nva_vm_ids[@]}"; do
   vm_id=${nva_vm_ids[$index]}
   [[ $vm_id == /subscriptions/* ]] || die "--nva-vm-id must be an Azure resource ID: $vm_id"
   port=$((local_port_base + index))
-  log="${XDG_RUNTIME_DIR:-$HOME/.cache}/ecs-vwan-fwaas-bastion-$BASHPID-$index.log"
+  log="${XDG_RUNTIME_DIR:-$HOME/.cache}/fd-fwaas-bastion-$BASHPID-$index.log"
   mkdir -p "${log%/*}"
   tunnel_logs+=("$log")
 

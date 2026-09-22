@@ -9,7 +9,7 @@ command -v jq >/dev/null || {
 }
 
 export EVIDENCE_DIR="${EVIDENCE_DIR:-$PWD/evidence}"
-export SSH_KEY="${SSH_KEY:-$HOME/.ssh/ecs-vwan-fwaas-demo}"
+export SSH_KEY="${SSH_KEY:-$HOME/.ssh/fd-fwaas-demo}"
 
 test -s "$EVIDENCE_DIR/01-isv-core.json" || return 1
 test -s "$EVIDENCE_DIR/02-customer-core.json" || return 1
@@ -17,7 +17,8 @@ test -s "$EVIDENCE_DIR/03-isv-routing.json" || return 1
 test -s "$EVIDENCE_DIR/04-customer-connection.json" || return 1
 
 jq -e '
-  [
+  (.nva_virtual_machines.value | length == 2) and
+  ([
     .isv_virtual_network.value.resource_group,
     .isv_bastion.value.name,
     .isv_workload_virtual_machine.value.id,
@@ -25,19 +26,14 @@ jq -e '
     .isv_workload_virtual_machine.value.private_ip_address,
     .isv_workload_subnet.value.address_prefixes[0],
     .nva_load_balancer.value.id,
-    .nva_load_balancer.value.frontend_ip,
-    .nva_virtual_machines.value["ecs-vwan-isv-nva-1"].id,
-    .nva_virtual_machines.value["ecs-vwan-isv-nva-1"].nic_id,
-    .nva_virtual_machines.value["ecs-vwan-isv-nva-1"].private_ip,
-    .nva_virtual_machines.value["ecs-vwan-isv-nva-2"].id,
-    .nva_virtual_machines.value["ecs-vwan-isv-nva-2"].nic_id,
-    .nva_virtual_machines.value["ecs-vwan-isv-nva-2"].private_ip
-  ] | all(. != null and . != "")
+    .nva_load_balancer.value.frontend_ip
+  ] | all(. != null and . != "")) and
+  ([.nva_virtual_machines.value[] | .id, .nic_id, .private_ip] | all(. != null and . != ""))
 ' "$EVIDENCE_DIR/01-isv-core.json" >/dev/null || return 1
 
 jq -e '
   [
-    .customer_resource_group.value.name,
+    .customer_bastion.value.resource_group,
     .customer_bastion.value.name,
     .customer_workload_virtual_machine.value.id,
     .customer_workload_virtual_machine.value.nic_id,
@@ -62,7 +58,7 @@ jq -e '
   ] | all(. != null and . != "")
 ' "$EVIDENCE_DIR/04-customer-connection.json" >/dev/null || return 1
 
-export ISV_RESOURCE_GROUP="$(jq -er '.isv_virtual_network.value.resource_group' "$EVIDENCE_DIR/01-isv-core.json")"
+export ISV_RESOURCE_GROUP="$(jq -er '.isv_bastion.value.resource_group' "$EVIDENCE_DIR/01-isv-core.json")"
 export ISV_BASTION_NAME="$(jq -er '.isv_bastion.value.name' "$EVIDENCE_DIR/01-isv-core.json")"
 export ISV_WORKLOAD_VM_ID="$(jq -er '.isv_workload_virtual_machine.value.id' "$EVIDENCE_DIR/01-isv-core.json")"
 export ISV_WORKLOAD_NIC_ID="$(jq -er '.isv_workload_virtual_machine.value.nic_id' "$EVIDENCE_DIR/01-isv-core.json")"
@@ -71,17 +67,17 @@ export ISV_WORKLOAD_PREFIX="$(jq -er '.isv_workload_subnet.value.address_prefixe
 export NVA_LOAD_BALANCER_ID="$(jq -er '.nva_load_balancer.value.id' "$EVIDENCE_DIR/01-isv-core.json")"
 export NVA_LOAD_BALANCER_FRONTEND_IP="$(jq -er '.nva_load_balancer.value.frontend_ip' "$EVIDENCE_DIR/01-isv-core.json")"
 
-export NVA_1_NAME="ecs-vwan-isv-nva-1"
-export NVA_1_VM_ID="$(jq -er '.nva_virtual_machines.value["ecs-vwan-isv-nva-1"].id' "$EVIDENCE_DIR/01-isv-core.json")"
-export NVA_1_NIC_ID="$(jq -er '.nva_virtual_machines.value["ecs-vwan-isv-nva-1"].nic_id' "$EVIDENCE_DIR/01-isv-core.json")"
-export NVA_1_PRIVATE_IP="$(jq -er '.nva_virtual_machines.value["ecs-vwan-isv-nva-1"].private_ip' "$EVIDENCE_DIR/01-isv-core.json")"
+export NVA_1_NAME="$(jq -er '.nva_virtual_machines.value | to_entries | sort_by(.value.zone) | .[0].key' "$EVIDENCE_DIR/01-isv-core.json")"
+export NVA_1_VM_ID="$(jq -er --arg name "$NVA_1_NAME" '.nva_virtual_machines.value[$name].id' "$EVIDENCE_DIR/01-isv-core.json")"
+export NVA_1_NIC_ID="$(jq -er --arg name "$NVA_1_NAME" '.nva_virtual_machines.value[$name].nic_id' "$EVIDENCE_DIR/01-isv-core.json")"
+export NVA_1_PRIVATE_IP="$(jq -er --arg name "$NVA_1_NAME" '.nva_virtual_machines.value[$name].private_ip' "$EVIDENCE_DIR/01-isv-core.json")"
 
-export NVA_2_NAME="ecs-vwan-isv-nva-2"
-export NVA_2_VM_ID="$(jq -er '.nva_virtual_machines.value["ecs-vwan-isv-nva-2"].id' "$EVIDENCE_DIR/01-isv-core.json")"
-export NVA_2_NIC_ID="$(jq -er '.nva_virtual_machines.value["ecs-vwan-isv-nva-2"].nic_id' "$EVIDENCE_DIR/01-isv-core.json")"
-export NVA_2_PRIVATE_IP="$(jq -er '.nva_virtual_machines.value["ecs-vwan-isv-nva-2"].private_ip' "$EVIDENCE_DIR/01-isv-core.json")"
+export NVA_2_NAME="$(jq -er '.nva_virtual_machines.value | to_entries | sort_by(.value.zone) | .[1].key' "$EVIDENCE_DIR/01-isv-core.json")"
+export NVA_2_VM_ID="$(jq -er --arg name "$NVA_2_NAME" '.nva_virtual_machines.value[$name].id' "$EVIDENCE_DIR/01-isv-core.json")"
+export NVA_2_NIC_ID="$(jq -er --arg name "$NVA_2_NAME" '.nva_virtual_machines.value[$name].nic_id' "$EVIDENCE_DIR/01-isv-core.json")"
+export NVA_2_PRIVATE_IP="$(jq -er --arg name "$NVA_2_NAME" '.nva_virtual_machines.value[$name].private_ip' "$EVIDENCE_DIR/01-isv-core.json")"
 
-export CUSTOMER_RESOURCE_GROUP="$(jq -er '.customer_resource_group.value.name' "$EVIDENCE_DIR/02-customer-core.json")"
+export CUSTOMER_RESOURCE_GROUP="$(jq -er '.customer_bastion.value.resource_group' "$EVIDENCE_DIR/02-customer-core.json")"
 export CUSTOMER_BASTION_NAME="$(jq -er '.customer_bastion.value.name' "$EVIDENCE_DIR/02-customer-core.json")"
 export CUSTOMER_WORKLOAD_VM_ID="$(jq -er '.customer_workload_virtual_machine.value.id' "$EVIDENCE_DIR/02-customer-core.json")"
 export CUSTOMER_WORKLOAD_NIC_ID="$(jq -er '.customer_workload_virtual_machine.value.nic_id' "$EVIDENCE_DIR/02-customer-core.json")"
@@ -96,4 +92,3 @@ export ISV_ROUTE_ID="$(jq -er '.isv_route_table.value.route.id' "$EVIDENCE_DIR/0
 export ISV_HUB_CONNECTION_ID="$(jq -er '.isv_hub_connection.value.id' "$EVIDENCE_DIR/04-customer-connection.json")"
 
 export AZURE_SUBSCRIPTION="$(jq -er '.customer_virtual_hub.value.id | split("/")[2]' "$EVIDENCE_DIR/02-customer-core.json")"
-

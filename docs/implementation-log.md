@@ -57,7 +57,7 @@ It intentionally excludes credentials, access tokens, private keys, Terraform st
 ### D-005: Use a dedicated local SSH key
 
 - **Status:** Accepted
-- **Decision:** Generate an Ed25519 key pair at `~/.ssh/ecs-vwan-fwaas-demo`; Terraform receives only the public key.
+- **Decision:** Generate an Ed25519 key pair at `~/.ssh/fd-fwaas-demo`; Terraform receives only the public key.
 - **Rationale:** No SSH key existed in the environment, and password authentication is prohibited by the design.
 - **Consequence:** The private key is an operator prerequisite for Bastion native-client access and is never copied into this repository.
 
@@ -99,9 +99,23 @@ It intentionally excludes credentials, access tokens, private keys, Terraform st
 ### D-011: Persist verification evidence by deployment layer
 
 - **Status:** Accepted
-- **Decision:** Each verification run captures one `.json` Terraform output file for each of the four deployment layers. The committed root `environment.sh` loads resource identifiers, names, addresses, and prefixes from those files with `jq`. NVA values use explicit `ecs-vwan-isv-nva-1` and `ecs-vwan-isv-nva-2` map keys.
-- **Rationale:** Operators can inspect four explicit capture commands, source the environment once in an ongoing shell, and paste the remaining linear commands without replacing placeholders or relying on object ordering.
+- **Decision:** Each verification run captures one `.json` Terraform output file for each of the four deployment layers. The committed root `environment.sh` loads resource identifiers, names, addresses, and prefixes from those files with `jq`. NVA values are selected by availability zone from the structured VM output.
+- **Rationale:** Operators can inspect four explicit capture commands, source the environment once in an ongoing shell, and paste the remaining linear commands without replacing placeholders or hard-coding derived resource names.
 - **Consequence:** `jq` is a verification prerequisite. Verification artifacts are stored under the ignored `evidence/` directory and must be regenerated and re-sourced after infrastructure changes.
+
+### D-012: Give each NVA an outbound public IP
+
+- **Status:** Accepted
+- **Decision:** Attach a zonal Standard public IP to each NVA NIC.
+- **Rationale:** Standard internal Load Balancers do not provide outbound connectivity to backend VMs.
+- **Consequence:** The NVAs have explicit outbound access; the subnet NSG still denies unsolicited internet ingress.
+
+### D-013: Provision verification tools with cloud-init
+
+- **Status:** Accepted
+- **Decision:** Install `netcat-openbsd`, `net-tools`, `tcpdump`, `iputils-ping`, and `python3` on every demo VM from one shared package manifest.
+- **Rationale:** Automated and interactive verification must not depend on manual package installation.
+- **Consequence:** Applying the new `custom_data` replaces both NVAs and both workload VMs.
 
 ## Implementation checklist
 
@@ -124,13 +138,14 @@ It intentionally excludes credentials, access tokens, private keys, Terraform st
 ## Validation evidence
 
 - Terraform `1.16.3` archive downloaded from HashiCorp Releases and verified against the published SHA-256 checksum before installation to `~/.local/bin/terraform`.
-- Dedicated Ed25519 key generated at `~/.ssh/ecs-vwan-fwaas-demo`; its fingerprint is `SHA256:szFZ1/mGFD6qsIA8MkPLwssJdyTpcHKQMsmgkVvO9YI`.
+- The current runbook expects a dedicated Ed25519 key at `~/.ssh/fd-fwaas-demo`; operators generate it before deployment.
 - Active Azure subscription and identity were checked before implementation. Required Compute, Network, and Storage providers are registered.
 - Sweden Central preflight found `Standard_B2s` available in zones 1, 2, and 3, with 100 regional vCPUs and 100 BS-family vCPUs permitted at the time of the check.
 - `bash -n` passes for all three operations scripts; each script is executable and its `--help` path succeeds.
 - `diagrams/architecture.drawio` and `diagrams/architecture.svg` parse successfully as XML.
 - `04-customer-connection` and `03-isv-routing` initialize and validate successfully with AzureRM `5.6.0`.
 - `terraform fmt -recursive` and `terraform validate` pass for all four roots.
+- Shared diagnostic cloud-init renders with the required five-package set on all four VMs. Refresh-free plans show only the expected four VM replacements and cloud-init health-extension changes.
 - Full, refresh-free plans succeed: ISV core 26 resources, customer core 14 graph objects, ISV routing 3 resources, and customer connection 2 graph objects. The customer counts include a local `terraform_data` validation object rather than an additional Azure resource.
 - Targeted negative plans prove that a `/27` Bastion subnet and a malformed Virtual Hub resource ID fail with blocking precondition errors.
 - Independent implementation review found no blockers in the Virtual WAN static-route behavior, `Contains` override semantics, HA Ports/Floating IP configuration, state ownership, or NVA subnet routing. Review findings about blocking validations, nftables reload, TCP observer use, ICMP handling, and reserved frontend addresses were fixed before deployment.
@@ -147,24 +162,16 @@ It intentionally excludes credentials, access tokens, private keys, Terraform st
 - Post-deployment `terraform plan -detailed-exitcode` returned exit code 0 for all four roots: no drift.
 - The verification guide was simplified into 24 linear copy-and-paste Bash blocks. It writes four per-layer Terraform JSON snapshots, sources 27 JSON-derived values from the committed `environment.sh` using `jq`, and captures Azure status, routes, counters, and connectivity evidence.
 - The simplified workflow was validated against the deployed environment: all four JSON captures are valid, all derived values are non-empty, NVA name-keyed lookups resolve correctly, Azure hub and connection state checks pass, every Bash block passes `bash -n`, and no angle-bracket placeholders or inline control structures remain.
+- Azure CLI commands that identify resources with full `--ids` omit the redundant `--subscription` option. Subscription selection remains only on account- or name-based commands such as Bastion operations.
+- The verification guide includes an interactive packet-observation procedure: ensure NVA 1 is running, stop NVA 2, use direct Bastion SSH sessions, capture NVA 1 forwarding with `tcpdump`, exchange a raw TCP message on port 2000 between customer and ISV workloads, verify preserved source/destination addresses, and explicitly restore NVA 2.
 
 ## Deployment handoff
 
-### Deployed resources
+### Archived deployment
 
-- **Subscription:** `eaf4193c-36fa-42b9-b284-5ef3f7e8646c`
-- **Region:** Sweden Central
-- **ISV resource group:** `rg-ecs-vwan-isv-core-demo`
-- **ISV VNet:** `vnet-ecs-vwan-isv-demo`
-- **ISV workload VM:** `vm-ecs-vwan-isv-workload-demo` (`10.100.1.4`)
-- **NVA load balancer:** `ecs-vwan-isv-nva-lb` (`10.100.0.10`)
-- **NVA VMs:** `ecs-vwan-isv-nva-1` (`10.100.0.5`, zone 1) and `ecs-vwan-isv-nva-2` (`10.100.0.4`, zone 2)
-- **ISV route table:** `rt-ecs-vwan-isv-to-customer-demo`
-- **Customer resource group:** `rg-vwan-customer-demo`
-- **Virtual WAN / hub:** `vwan-customer-demo` / `vhub-customer-demo`
-- **Customer VNet:** `vnet-customer-demo`
-- **Customer workload VM:** `vm-customer-workload-demo` (`10.10.1.10`)
-- **Hub connections:** `conn-customer-workload-demo` and `conn-isv-demo`
+The original verification deployment was destroyed after evidence capture. Its
+historical Azure identifiers remain only in the separately retained evidence
+archive; current deployments use the prefix-derived names documented above.
 
 ### Remaining interactive verification
 
@@ -187,4 +194,12 @@ terraform -chdir=02-customer-core destroy -input=false -var-file=demo.tfvars
 terraform -chdir=01-isv-core destroy -input=false -var-file=demo.tfvars
 ```
 
-Afterward, verify that both resource groups and all Bastion public IPs, disks, and Virtual WAN resources are gone before deleting local state.
+Afterward, verify that all six resource groups and all Bastion public IPs, disks, and Virtual WAN resources are gone before deleting local state.
+
+## Prefix-derived naming and resource-group split
+
+- **Decision:** Expose only `isv_prefix` and `customer_prefix`, defaulting to `fd-isv` and `fd-customer`. Derive all individual names with fixed role components and Azure type suffixes.
+- **Decision:** Create network, workload, and Bastion resource groups for each side. Keep the complete NVA cluster in the ISV network group and keep every NIC with its VM.
+- **Decision:** Place all NSGs in the network groups and associate them with subnets. Manage the Bastion subnet NSGs explicitly with the required Azure Bastion rules.
+- **Decision:** Keep the ISV customer route table in the ISV network group. Keep customer-side routes on the Virtual Hub connections and managed route tables.
+- **Decision:** Preserve `AzureBastionSubnet` as the required fixed Azure subnet name; all other managed resource names use type-specific suffixes.
