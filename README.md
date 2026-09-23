@@ -2,7 +2,7 @@
 
 This repository deploys a disposable Azure demo that routes traffic between a customer workload VNet and an ISV workload VNet through a pair of ISV-managed Linux forwarding appliances. It implements the architecture and ownership boundaries in [design.md](design.md).
 
-> **Cost warning:** Azure Bastion Standard and the Standard Virtual WAN hub are continuously billed while deployed. Destroy the roots in the documented order as soon as verification is complete.
+> **Cost warning:** Azure Bastion Standard, the Standard Virtual WAN hub, and the optional Azure Firewall are continuously billed while deployed. Destroy the roots in the documented order as soon as verification is complete.
 
 ## Architecture and ownership
 
@@ -88,6 +88,11 @@ Also inspect branch prefixes and effective hub routes in the target Virtual WAN.
 ## Configure inputs
 
 Each root contains a `demo.tfvars` with non-secret demo values. Set the same subscription ID in every file and review address prefixes, VM sizes, zones, usernames, the SSH public-key path, and copied cross-root IDs. Resource names are derived from the optional `isv_prefix` and `customer_prefix` variables and do not need to be listed in `demo.tfvars`. If overriding a prefix, use the same `isv_prefix` in roots 01 and 03 and the same `customer_prefix` in roots 02 and 04.
+
+`02-customer-core/demo.tfvars` enables `virtual_hub_deploy_firewall`. Set it to
+`false` to retain the original unsecured hub. When enabled, only the customer
+workload connection learns the Azure Firewall internet default route; private
+customer-to-ISV routing remains unchanged.
 
 Local state is intentional. Keep each root's `.terraform` directory and state files until its resources are destroyed. Never commit state or plan files.
 

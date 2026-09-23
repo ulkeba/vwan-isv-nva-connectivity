@@ -94,6 +94,25 @@ az network vhub connection show \
 Continue only when the hub provisioning state is `Succeeded`, the hub routing
 state is **`Provisioned`**, and both connections are `Succeeded`.
 
+When `virtual_hub_deploy_firewall` is enabled, capture the firewall identifiers
+and provisioning state:
+
+```bash
+export CUSTOMER_FIREWALL_ID="$(jq -er \
+  '.customer_virtual_hub_firewall.value.firewall_id' \
+  "$EVIDENCE_DIR/02-customer-core.json")"
+export CUSTOMER_FIREWALL_ROUTING_INTENT_ID="$(jq -er \
+  '.customer_virtual_hub_firewall.value.routing_intent_id' \
+  "$EVIDENCE_DIR/02-customer-core.json")"
+
+az network firewall show \
+  --ids "$CUSTOMER_FIREWALL_ID" \
+  --output json > "$EVIDENCE_DIR/customer-firewall-status.json"
+az resource show \
+  --ids "$CUSTOMER_FIREWALL_ROUTING_INTENT_ID" \
+  --output json > "$EVIDENCE_DIR/customer-firewall-routing-intent.json"
+```
+
 ## 3. Inspect effective routes
 
 Use the repository helper for tunnel-free route inspection:
@@ -131,6 +150,11 @@ Confirm the customer learns the ISV prefix, the ISV workload sends the customer
 prefix to `$NVA_LOAD_BALANCER_FRONTEND_IP`, and NVA 1 can route the customer
 prefix through the hub. Routes support the traffic evidence; they do not
 replace it.
+
+With Azure Firewall enabled, also confirm that only the customer workload NIC
+learns `0.0.0.0/0` through Azure Firewall. The customer route for
+`10.100.1.0/24` and the ISV route for `10.10.0.0/16` must still use the NVA
+path. Stop if either private prefix resolves to Azure Firewall.
 
 ## 4. Capture counters, then test both directions
 

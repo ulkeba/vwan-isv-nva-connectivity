@@ -259,6 +259,7 @@ resource "azurerm_virtual_hub_connection" "customer_workload" {
   name                      = "${local.network_prefix}-workload-conn"
   virtual_hub_id            = azurerm_virtual_hub.customer.id
   remote_virtual_network_id = azurerm_virtual_network.customer.id
+  internet_security_enabled = var.virtual_hub_deploy_firewall
 
   routing {
     associated_route_table_id = azurerm_virtual_hub.customer.default_route_table_id
@@ -275,4 +276,127 @@ resource "azurerm_virtual_hub_connection" "customer_workload" {
     update = "120m"
     delete = "120m"
   }
+}
+
+resource "azurerm_firewall_policy" "customer" {
+  count = var.virtual_hub_deploy_firewall ? 1 : 0
+
+  name                     = "${local.network_prefix}-fw-policy"
+  resource_group_name      = azurerm_resource_group.network.name
+  location                 = azurerm_resource_group.network.location
+  sku                      = "Standard"
+  threat_intelligence_mode = "Off"
+}
+
+resource "azurerm_firewall_policy_rule_collection_group" "customer" {
+  count = var.virtual_hub_deploy_firewall ? 1 : 0
+
+  name               = "${local.network_prefix}-fw-rules"
+  firewall_policy_id = azurerm_firewall_policy.customer[0].id
+  priority           = 100
+
+  network_rule_collection {
+    name     = "allow-private-10"
+    priority = 100
+    action   = "Allow"
+
+    rule {
+      name                  = "allow-10-to-10"
+      protocols             = ["Any"]
+      source_addresses      = ["10.0.0.0/8"]
+      destination_addresses = ["10.0.0.0/8"]
+      destination_ports     = ["*"]
+    }
+  }
+
+  application_rule_collection {
+    name     = "deny-facebook"
+    priority = 200
+    action   = "Deny"
+
+    rule {
+      name              = "deny-www-facebook-com"
+      source_addresses  = ["10.0.0.0/8"]
+      destination_fqdns = ["www.facebook.com"]
+
+      protocols {
+        type = "Http"
+        port = 80
+      }
+
+      protocols {
+        type = "Https"
+        port = 443
+      }
+    }
+  }
+
+  application_rule_collection {
+    name     = "allow-web"
+    priority = 300
+    action   = "Allow"
+
+    rule {
+      name              = "allow-http-https"
+      source_addresses  = ["10.0.0.0/8"]
+      destination_fqdns = ["*"]
+
+      protocols {
+        type = "Http"
+        port = 80
+      }
+
+      protocols {
+        type = "Https"
+        port = 443
+      }
+    }
+  }
+}
+
+resource "azurerm_firewall" "customer" {
+  count = var.virtual_hub_deploy_firewall ? 1 : 0
+
+  name                = "${local.network_prefix}-fw"
+  resource_group_name = azurerm_resource_group.network.name
+  location            = azurerm_resource_group.network.location
+  sku_name            = "AZFW_Hub"
+  sku_tier            = "Standard"
+  firewall_policy_id  = azurerm_firewall_policy.customer[0].id
+
+  virtual_hub {
+    virtual_hub_id  = azurerm_virtual_hub.customer.id
+    public_ip_count = 1
+  }
+
+  timeouts {
+    create = "120m"
+    read   = "15m"
+    update = "120m"
+    delete = "120m"
+  }
+
+  depends_on = [azurerm_virtual_hub_connection.customer_workload]
+}
+
+resource "azurerm_virtual_hub_routing_intent" "customer_internet" {
+  count = var.virtual_hub_deploy_firewall ? 1 : 0
+
+  name           = "${local.network_prefix}-internet-routing-intent"
+  virtual_hub_id = azurerm_virtual_hub.customer.id
+
+  routing_policy {
+    name         = "InternetTraffic"
+    destinations = ["Internet"]
+    next_hop     = azurerm_firewall.customer[0].id
+  }
+
+  timeouts {
+    create = "120m"
+    read   = "15m"
+    update = "120m"
+    delete = "120m"
+  }
+
+  depends_on = [azurerm_firewall_policy_rule_collection_group.customer]
 }

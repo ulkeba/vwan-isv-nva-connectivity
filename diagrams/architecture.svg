@@ -32,8 +32,8 @@
   <text class="small" x="680" y="168">Customer core lifecycle</text>
   <ellipse cx="800" cy="245" rx="145" ry="55" fill="#ffe6cc" stroke="#d79b00" stroke-width="2"/>
   <text class="head" x="800" y="232">Virtual hub 10.0.0.0/23</text>
-  <text class="small" x="800" y="254">Associated + propagated hub route tables</text>
-  <text class="small" x="800" y="273">defaultRouteTable or customer-defined</text>
+  <text class="small" x="800" y="254">Optional Azure Firewall: customer internet only</text>
+  <text class="small" x="800" y="273">Private NVA routes unchanged</text>
   <path d="M680 185 L755 201" stroke="#d79b00" stroke-width="2" marker-end="url(#grayArrow)"/>
 
   <rect class="box" x="60" y="180" width="450" height="500" fill="#fff" stroke="#6c8ebf"/>

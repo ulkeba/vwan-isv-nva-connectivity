@@ -34,6 +34,18 @@ output "customer_virtual_hub" {
   }
 }
 
+output "customer_virtual_hub_firewall" {
+  description = "Optional Azure Firewall and internet routing details."
+  value = var.virtual_hub_deploy_firewall ? {
+    firewall_id         = azurerm_firewall.customer[0].id
+    firewall_name       = azurerm_firewall.customer[0].name
+    firewall_policy_id  = azurerm_firewall_policy.customer[0].id
+    private_ip_address  = azurerm_firewall.customer[0].virtual_hub[0].private_ip_address
+    public_ip_addresses = azurerm_firewall.customer[0].virtual_hub[0].public_ip_addresses
+    routing_intent_id   = azurerm_virtual_hub_routing_intent.customer_internet[0].id
+  } : null
+}
+
 output "customer_virtual_network" {
   description = "Customer virtual network details."
   value = {
@@ -77,7 +89,8 @@ output "customer_bastion" {
 output "customer_workload_connection" {
   description = "Customer workload virtual hub connection details."
   value = {
-    id   = azurerm_virtual_hub_connection.customer_workload.id
-    name = azurerm_virtual_hub_connection.customer_workload.name
+    id                        = azurerm_virtual_hub_connection.customer_workload.id
+    name                      = azurerm_virtual_hub_connection.customer_workload.name
+    internet_security_enabled = azurerm_virtual_hub_connection.customer_workload.internet_security_enabled
   }
 }

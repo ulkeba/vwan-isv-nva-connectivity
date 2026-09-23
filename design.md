@@ -20,6 +20,7 @@ Terraform deploys the infrastructure. Cloud-init and systemd configure the Linux
 
 - One Azure region and one Virtual WAN virtual hub.
 - One customer workload VNet connected to the virtual hub.
+- Optional Azure Firewall with customer-only internet routing intent.
 - One ISV VNet with a workload subnet, an NVA subnet, and two zonal Linux forwarding VMs.
 - A Standard internal load balancer with an HA Ports rule as the stable NVA next hop.
 - One public IP per NVA for NVA-originated outbound connectivity.
@@ -30,7 +31,7 @@ Terraform deploys the infrastructure. Cloud-init and systemd configure the Linux
 
 ### Out of scope
 
-- Routing Intent, Azure Firewall, hub-integrated NVAs, ExpressRoute, VPN, workload internet egress routing, multi-hub routing, IPv6, DNS integration, and firewall inspection rules.
+- Private Traffic routing intent, hub-integrated NVAs, ExpressRoute, VPN, ISV workload internet inspection, multi-hub routing, IPv6, DNS integration, and production firewall policy.
 - VM scale sets, autoscaling, production hardening, patch management, and stateful firewall failover.
 - Cross-tenant authorization automation. The deployment identity must already have access to the required subscriptions.
 
@@ -38,7 +39,7 @@ Terraform deploys the infrastructure. Cloud-init and systemd configure the Linux
 
 ### AD-01: Use a spoke NVA
 
-The NVA pair runs in the ISV VNet. Virtual WAN connection-level static routes direct traffic to the internal load-balancer frontend. Routing Intent is not used because this is a spoke-NVA scenario.
+The NVA pair runs in the ISV VNet. Virtual WAN connection-level static routes direct private traffic to the internal load-balancer frontend. Optional Internet Traffic routing intent applies only to customer workload internet traffic and does not alter the spoke-NVA private path.
 
 Reference: [Static routes in Virtual WAN](https://learn.microsoft.com/azure/virtual-wan/static-routes)
 
@@ -99,6 +100,27 @@ References:
 
 - [Azure Bastion overview](https://learn.microsoft.com/azure/bastion/bastion-overview)
 - [Connect with the Linux native client](https://learn.microsoft.com/azure/bastion/connect-vm-native-client-linux)
+
+### AD-07: Make customer internet filtering optional
+
+`virtual_hub_deploy_firewall` conditionally deploys a Standard `AZFW_Hub`
+firewall, Firewall Policy, rules, and Internet Traffic routing intent. Only the
+customer workload connection enables Internet Security and learns
+`0.0.0.0/0` through Azure Firewall.
+
+Private routes remain more specific: customer-to-ISV traffic uses the
+`10.100.1.0/24` connection static route to the NVA, while return traffic uses
+the ISV workload `10.10.0.0/16` UDR to the NVA. Private Traffic routing intent
+is intentionally omitted.
+
+The demo policy allows `10.0.0.0/8` to `10.0.0.0/8`, allows HTTP/HTTPS to all
+FQDNs except `www.facebook.com`, and otherwise uses Azure Firewall's default
+deny.
+
+References:
+
+- [Securing internet access with routing intent](https://learn.microsoft.com/azure/virtual-wan/about-internet-routing)
+- [Azure Firewall rule processing](https://learn.microsoft.com/azure/firewall/rule-processing)
 
 ## 4. Demo address plan
 
@@ -251,6 +273,7 @@ Examples:
 - `nva_virtual_machines`: map keyed by NVA name with ID, zone, NIC ID, and private IP.
 - `isv_bastion`: ID, name, and DNS name.
 - `customer_virtual_hub`: ID, name, address prefix, and default route-table ID.
+- `customer_virtual_hub_firewall`: nullable firewall, policy, address, and routing-intent details.
 - `customer_workload_connection`: ID.
 - `isv_route_table`: ID and route details.
 - `isv_hub_connection`: ID and configured route-table IDs.

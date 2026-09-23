@@ -24,6 +24,12 @@ variable "virtual_hub_address_prefix" {
   type        = string
 }
 
+variable "virtual_hub_deploy_firewall" {
+  description = "Deploy Azure Firewall and route customer workload internet traffic through it."
+  type        = bool
+  default     = false
+}
+
 variable "customer_virtual_network_address_space" {
   description = "Address space assigned to the customer virtual network."
   type        = string

@@ -2,6 +2,7 @@ subscription_id = "eaf4193c-36fa-42b9-b284-5ef3f7e8646c"
 location        = "Sweden Central"
 
 virtual_hub_address_prefix             = "10.0.0.0/23"
+virtual_hub_deploy_firewall            = true
 customer_virtual_network_address_space = "10.10.0.0/16"
 customer_workload_subnet_prefix        = "10.10.1.0/24"
 customer_bastion_subnet_prefix         = "10.10.255.0/26"

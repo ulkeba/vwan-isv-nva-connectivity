@@ -18,8 +18,8 @@ It intentionally excludes credentials, access tokens, private keys, Terraform st
 | Operations scripts | Complete | Bash syntax, executable help paths, and argument error paths pass |
 | Documentation and diagrams | Complete | Draw.io and SVG parse as XML; README and verification guide added |
 | Local validation | Complete | All roots validate and plan; negative validation tests reject invalid inputs |
-| Azure deployment | Complete | All four roots applied in order; all control-plane states succeeded |
-| Smoke checks and handoff | Complete | Both directions and no-SNAT verified; NVA counters increased; four post-deployment plans show no drift |
+| Azure deployment | Destroyed | Secured-hub deployment tested end to end and all four roots destroyed in reverse dependency order |
+| Smoke checks and handoff | Complete | Routing, firewall policy, bidirectional no-SNAT traffic, NVA failover, drift, and cleanup verified |
 
 ## Decisions
 
@@ -117,6 +117,20 @@ It intentionally excludes credentials, access tokens, private keys, Terraform st
 - **Rationale:** Automated and interactive verification must not depend on manual package installation.
 - **Consequence:** Applying the new `custom_data` replaces both NVAs and both workload VMs.
 
+### D-014: Destroy the demo deployment
+
+- **Status:** Accepted
+- **Decision:** Destroy all four Terraform roots in reverse dependency order.
+- **Rationale:** The user requested complete removal of the demo deployment.
+- **Consequence:** All four Terraform states are empty and all six demo resource groups have been deleted.
+
+### D-015: Add optional customer internet filtering
+
+- **Status:** Accepted
+- **Decision:** Let `02-customer-core` optionally deploy Azure Firewall and Internet Traffic routing intent for the customer workload connection only.
+- **Rationale:** Demonstrate a secured hub with minimal code impact while preserving the existing symmetric private NVA path.
+- **Consequence:** The customer learns `0.0.0.0/0` through Azure Firewall; all private route destinations and NVA next hops remain unchanged. Azure Firewall adds significant hourly cost.
+
 ## Implementation checklist
 
 - [x] Establish repository foundations and generate the SSH key.
@@ -164,6 +178,16 @@ It intentionally excludes credentials, access tokens, private keys, Terraform st
 - The simplified workflow was validated against the deployed environment: all four JSON captures are valid, all derived values are non-empty, NVA name-keyed lookups resolve correctly, Azure hub and connection state checks pass, every Bash block passes `bash -n`, and no angle-bracket placeholders or inline control structures remain.
 - Azure CLI commands that identify resources with full `--ids` omit the redundant `--subscription` option. Subscription selection remains only on account- or name-based commands such as Bastion operations.
 - The verification guide includes an interactive packet-observation procedure: ensure NVA 1 is running, stop NVA 2, use direct Bastion SSH sessions, capture NVA 1 forwarding with `tcpdump`, exchange a raw TCP message on port 2000 between customer and ISV workloads, verify preserved source/destination addresses, and explicitly restore NVA 2.
+- The optional secured-hub implementation was deployed with `virtual_hub_deploy_firewall = true`. Terraform applied 33 ISV-core, 23 customer-core, 3 ISV-routing, and 2 customer-connection objects.
+- The Virtual Hub reached `Succeeded` / `Provisioned`; the Azure Firewall, InternetTraffic routing intent, and both hub connections reached `Succeeded`.
+- Internet Security was enabled only on the customer workload connection. The ISV connection remained disabled.
+- Effective routes proved that the customer default route targets Azure Firewall, customer `10.100.1.0/24` remains on the ISV connection, ISV `10.10.0.0/16` remains an active UDR to `10.100.0.10`, and the ISV default route remains direct Internet.
+- Customer-to-ISV and ISV-to-customer ICMP/TCP passed with destination-observed original source addresses. NVA counters increased in both directions.
+- Customer access to an allowed HTTPS destination succeeded, while `https://www.facebook.com` was blocked by the firewall policy.
+- With NVA 1 stopped, both traffic directions and source preservation continued through NVA 2. NVA 2 counters increased from 12 to 28 packets in each direction; NVA 1 was restored before teardown.
+- Post-deployment Terraform plans reported no changes for all four roots.
+- Teardown destroyed all 61 managed graph objects in reverse order. All four Terraform states contain zero resources, all six demo resource groups are absent, and no matching Azure resources remain.
+- Complete command, JSON, route, counter, connectivity, firewall, drift, and cleanup evidence is retained in the ignored local `evidence/` directory with SHA-256 checksums.
 
 ## Deployment handoff
 
@@ -175,17 +199,15 @@ archive; current deployments use the prefix-derived names documented above.
 
 ### Remaining interactive verification
 
-The user requested that resources remain deployed for verification. The following intentional disruptions were not automated:
-
-- Stop either NVA, wait for probe convergence, and repeat both directional tests.
-- Destroy and restore `03-isv-routing` to exercise the return-path negative control.
-- Destroy and restore `04-customer-connection` to exercise the connection negative control.
-
-Follow `docs/verification.md` for commands and evidence requirements.
+No resources remain deployed. The automated NVA 1 failover test passed. The
+manual packet-capture procedure and destructive negative controls remain
+available in `docs/verification.md` for a future deployment.
 
 ### Ongoing cost and teardown
 
-Two Bastion Standard hosts and the Standard Virtual WAN hub continue accruing charges. Preserve all four local state files and destroy in this exact order:
+No demo resources remain and no ongoing demo charges are expected. For future
+deployments, preserve all four local state files and destroy in this exact
+order:
 
 ```bash
 terraform -chdir=04-customer-connection destroy -input=false -var-file=demo.tfvars
