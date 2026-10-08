@@ -29,6 +29,11 @@ locals {
 resource "terraform_data" "input_validation" {
   lifecycle {
     precondition {
+      condition     = !var.virtual_hub_route_private_traffic || var.virtual_hub_deploy_firewall
+      error_message = "virtual_hub_route_private_traffic requires virtual_hub_deploy_firewall."
+    }
+
+    precondition {
       condition     = alltrue([for range in values(local.ipv4_ranges) : range != null])
       error_message = "All address plan inputs must be valid IPv4 CIDR prefixes."
     }

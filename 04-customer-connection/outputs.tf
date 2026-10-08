@@ -1,11 +1,9 @@
 output "isv_hub_connection" {
   description = "ISV virtual hub connection and configured routing contract."
   value = {
-    id                            = azurerm_virtual_hub_connection.isv.id
-    name                          = azurerm_virtual_hub_connection.isv.name
-    associated_route_table_id     = var.associated_route_table_id
-    propagated_route_table_ids    = var.propagated_route_table_ids
-    propagated_route_table_labels = var.propagated_route_table_labels
+    id                        = azurerm_virtual_hub_connection.isv.id
+    name                      = azurerm_virtual_hub_connection.isv.name
+    associated_route_table_id = var.associated_route_table_id
     static_route = {
       name                = "${local.network_prefix}-isv-workload-route"
       address_prefixes    = [var.isv_workload_address_prefix]

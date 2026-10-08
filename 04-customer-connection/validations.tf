@@ -26,29 +26,18 @@ resource "terraform_data" "input_validation" {
     }
 
     precondition {
-      condition = alltrue(concat(
-        [can(regex("(?i)^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.Network/virtualHubs/[^/]+/hubRouteTables/[^/]+$", var.associated_route_table_id))],
-        [for id in var.propagated_route_table_ids : can(regex("(?i)^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.Network/virtualHubs/[^/]+/hubRouteTables/[^/]+$", id))]
-      ))
-      error_message = "Associated and propagated route table IDs must be complete Virtual Hub Route Table resource IDs."
+      condition     = can(regex("(?i)^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.Network/virtualHubs/[^/]+/hubRouteTables/[^/]+$", var.associated_route_table_id))
+      error_message = "associated_route_table_id must be a complete Virtual Hub Route Table resource ID."
     }
 
     precondition {
-      condition = alltrue(concat(
-        [startswith(lower(var.associated_route_table_id), "${lower(var.virtual_hub_id)}/hubroutetables/")],
-        [for id in var.propagated_route_table_ids : startswith(lower(id), "${lower(var.virtual_hub_id)}/hubroutetables/")]
-      ))
-      error_message = "Associated and propagated route tables must belong to virtual_hub_id."
+      condition     = startswith(lower(var.associated_route_table_id), "${lower(var.virtual_hub_id)}/hubroutetables/")
+      error_message = "associated_route_table_id must belong to virtual_hub_id."
     }
 
     precondition {
       condition     = startswith(lower(var.virtual_hub_id), "/subscriptions/${lower(var.subscription_id)}/")
       error_message = "virtual_hub_id must belong to subscription_id."
-    }
-
-    precondition {
-      condition     = length(var.propagated_route_table_ids) > 0 && length(var.propagated_route_table_labels) > 0 && alltrue([for label in var.propagated_route_table_labels : trimspace(label) != ""])
-      error_message = "At least one propagated route table ID and one non-empty label are required."
     }
 
     precondition {

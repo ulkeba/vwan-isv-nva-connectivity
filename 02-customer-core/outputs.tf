@@ -46,6 +46,15 @@ output "customer_virtual_hub_firewall" {
   } : null
 }
 
+output "customer_firewall_log_analytics_workspace" {
+  description = "Optional Log Analytics workspace receiving structured Azure Firewall logs."
+  value = var.virtual_hub_deploy_firewall ? {
+    id           = azurerm_log_analytics_workspace.customer_firewall[0].id
+    name         = azurerm_log_analytics_workspace.customer_firewall[0].name
+    workspace_id = azurerm_log_analytics_workspace.customer_firewall[0].workspace_id
+  } : null
+}
+
 output "customer_virtual_network" {
   description = "Customer virtual network details."
   value = {
@@ -73,6 +82,7 @@ output "customer_workload_virtual_machine" {
     name               = module.customer_workload_vm.name
     nic_id             = module.customer_workload_vm.nic_id
     private_ip_address = module.customer_workload_vm.private_ip_address
+    admin_username     = var.customer_workload_admin_username
   }
 }
 

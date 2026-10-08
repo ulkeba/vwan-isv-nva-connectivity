@@ -54,8 +54,8 @@ The checked-in demo values target Sweden Central and use:
 |---|---|
 | Virtual hub | `10.0.0.0/23` |
 | Customer VNet / workload / Bastion | `10.10.0.0/16`, `10.10.1.0/24`, `10.10.255.0/26` |
-| ISV VNet / NVA / workload / Bastion | `10.100.0.0/16`, `10.100.0.0/24`, `10.100.1.0/24`, `10.100.255.0/26` |
-| NVA load-balancer frontend | `10.100.0.10` |
+| ISV VNet / NVA / workload / Bastion | `192.168.0.0/16`, `192.168.0.0/24`, `192.168.1.0/24`, `192.168.255.0/26` |
+| NVA load-balancer frontend | `192.168.0.10` |
 
 ## Preflight
 
@@ -87,12 +87,78 @@ Also inspect branch prefixes and effective hub routes in the target Virtual WAN.
 
 ## Configure inputs
 
-Each root contains a `demo.tfvars` with non-secret demo values. Set the same subscription ID in every file and review address prefixes, VM sizes, zones, usernames, the SSH public-key path, and copied cross-root IDs. Resource names are derived from the optional `isv_prefix` and `customer_prefix` variables and do not need to be listed in `demo.tfvars`. If overriding a prefix, use the same `isv_prefix` in roots 01 and 03 and the same `customer_prefix` in roots 02 and 04.
+Set one deployment name for the entire shell session. The name identifies the
+tfvars file and Terraform workspace in every root:
 
-`02-customer-core/demo.tfvars` enables `virtual_hub_deploy_firewall`. Set it to
-`false` to retain the original unsecured hub. When enabled, only the customer
-workload connection learns the Azure Firewall internet default route; private
-customer-to-ISV routing remains unchanged.
+```bash
+export DEPLOYMENT_NAME=swedencentral
+export TF_WORKSPACE="$DEPLOYMENT_NAME"
+export EVIDENCE_DIR="${EVIDENCE_DIR:-evidence_$DEPLOYMENT_NAME}"
+```
+
+`DEPLOYMENT_NAME` must contain only letters, digits, underscores, and hyphens,
+and it must not begin with a hyphen. Every root must contain a non-empty
+`${DEPLOYMENT_NAME}.tfvars`. `TF_WORKSPACE` keeps workspace selection local to
+the current shell, so different deployments can run concurrently without
+changing shared CLI workspace selection. The checked-in deployment sets are:
+
+| `DEPLOYMENT_NAME` | Region | Routing mode |
+|---|---|---|
+| `swedencentral` | Sweden Central | Azure Firewall, Internet Traffic Routing Intent only |
+| `ri-swedencentral` | Sweden Central | Azure Firewall, Internet and Private Traffic Routing Intent |
+| `ri-centralus` | Central US | Azure Firewall, Internet and Private Traffic Routing Intent |
+| `buc-nori-cin` | Central India | No Azure Firewall or Routing Intent; one non-zonal NVA |
+| `buc-nori-wcus` | West Central US | Azure Firewall, Internet and Private Traffic Routing Intent; one non-zonal NVA |
+| `buc-nori-gwc` | Germany West Central | Azure Firewall, Internet and Private Traffic Routing Intent; one non-zonal NVA |
+
+The three BUC profiles include matching `env_<DEPLOYMENT_NAME>.sh` files.
+Source one from the repository root to set `AZURE_CONFIG_DIR`,
+`DEPLOYMENT_NAME`, `TF_WORKSPACE`, and `EVIDENCE_DIR`.
+
+Set the same subscription ID in all four files for the chosen deployment and
+review address prefixes, VM sizes, zones, usernames, the SSH public-key path,
+and copied cross-root IDs. Resource names derive from the optional `isv_prefix`
+and `customer_prefix` variables. If overriding a prefix, use the same
+`isv_prefix` in roots 01 and 03 and the same `customer_prefix` in roots 02 and
+04.
+
+`01-isv-core` accepts `nva_vm_count` values from `1` through `3` and defaults
+to `2`. `nva_zones` defaults to `["1", "2"]`. Set `nva_zones = null` to
+deploy all NVAs as regional/non-zonal VMs with non-zonal Standard public IPs.
+Otherwise, provide exactly `nva_vm_count` distinct zones. Workload VM zone
+inputs also accept `null`. A one-NVA deployment cannot demonstrate load
+balancer failover, and non-zonal instances do not provide zone-failure
+isolation.
+
+The three BUC profiles route and permit ISV traffic across
+`192.168.0.0/16` without extra infrastructure exclusions. In root 01,
+`isv_forwarding_address_prefix` selects this broader forwarding range; leaving
+it unset preserves workload-subnet-only forwarding.
+The existing `isv_workload_address_prefix` input in roots 02 and 04 denotes
+the permitted/routed range, not the physical workload subnet.
+
+The actual workload subnet stays `192.168.1.0/24`. Additional workload subnets
+need suitable NSGs and the customer return-path UDR; never attach that UDR to
+the NVA or Bastion subnet. Leaving a subnet without a UDR is not an ingress
+access restriction:
+the full connection route can also affect hub traffic addressed to private
+infrastructure IPs. Changing NVA cloud-init replaces the NVA VM, interrupting
+forwarding in a one-NVA deployment.
+
+### Execution modes
+
+The two variables in
+`02-customer-core/${DEPLOYMENT_NAME}.tfvars` select the hub security behavior:
+
+| `virtual_hub_deploy_firewall` | `virtual_hub_route_private_traffic` | Configuration difference | Expected customer-to-ISV TCP/2000 flow |
+|---|---|---|---|
+| `false` | `false` | No Azure Firewall and no Routing Intent. | The Virtual Hub connection's specific ISV route sends the flow to the NVA load-balancer frontend. A healthy NVA forwards it to the ISV workload. |
+| `true` | `false` | Deploys Azure Firewall and applies Routing Intent only to Internet traffic. Private routes remain on the NVA path. | The specific ISV route remains preferred, so the flow traverses an NVA and normally does not appear in Azure Firewall logs. |
+| `true` | `true` | Adds the Private Traffic Routing Intent policy, which attracts private traffic to Azure Firewall. Root 04 omits an explicit propagated-route-table block. | Azure control-plane acceptance and the resulting Firewall/NVA path require live verification. |
+
+`virtual_hub_route_private_traffic=true` requires
+`virtual_hub_deploy_firewall=true`; Terraform rejects the unsupported
+combination before deployment.
 
 Local state is intentional. Keep each root's `.terraform` directory and state files until its resources are destroyed. Never commit state or plan files.
 
@@ -101,12 +167,27 @@ Local state is intentional. Keep each root's `.terraform` directory and state fi
 Run these commands from the repository root:
 
 ```bash
+: "${DEPLOYMENT_NAME:?Set DEPLOYMENT_NAME before initializing}"
+: "${TF_WORKSPACE:?Set TF_WORKSPACE to DEPLOYMENT_NAME before initializing}"
+test "$TF_WORKSPACE" = "$DEPLOYMENT_NAME"
+case "$DEPLOYMENT_NAME" in
+  ""|[![:alnum:]]*|*[![:alnum:]_-]*)
+    printf 'Invalid DEPLOYMENT_NAME: %s\n' "$DEPLOYMENT_NAME" >&2
+    exit 1
+    ;;
+esac
+
 for root in 01-isv-core 02-customer-core 03-isv-routing 04-customer-connection; do
+  test -s "$root/$DEPLOYMENT_NAME.tfvars"
   terraform -chdir="$root" init -input=false
   terraform -chdir="$root" fmt -check
   terraform -chdir="$root" validate
 done
 ```
+
+Run this initialization loop in each deployment shell. `TF_WORKSPACE` selects
+the same shell-local workspace name across all four roots for every plan,
+apply, output, and destroy command; do not use `terraform workspace select`.
 
 ## Deploy
 
@@ -115,22 +196,24 @@ done
 ```bash
 terraform -chdir=01-isv-core plan \
   -input=false \
-  -var-file=demo.tfvars \
-  -out=isv-core.tfplan
-terraform -chdir=01-isv-core apply -input=false isv-core.tfplan
+  -var-file="$DEPLOYMENT_NAME.tfvars" \
+  -out="$DEPLOYMENT_NAME-isv-core.tfplan"
+terraform -chdir=01-isv-core apply \
+  -input=false "$DEPLOYMENT_NAME-isv-core.tfplan"
 terraform -chdir=01-isv-core output
 ```
 
-Wait for cloud-init to finish on both NVAs and confirm both load-balancer backends are healthy before proceeding. The commands are in [verification.md](docs/verification.md).
+Wait for cloud-init to finish on every NVA and confirm all load-balancer backends are healthy before proceeding. The commands are in [verification.md](docs/verification.md).
 
 ### 2. Customer core
 
 ```bash
 terraform -chdir=02-customer-core plan \
   -input=false \
-  -var-file=demo.tfvars \
-  -out=customer-core.tfplan
-terraform -chdir=02-customer-core apply -input=false customer-core.tfplan
+  -var-file="$DEPLOYMENT_NAME.tfvars" \
+  -out="$DEPLOYMENT_NAME-customer-core.tfplan"
+terraform -chdir=02-customer-core apply \
+  -input=false "$DEPLOYMENT_NAME-customer-core.tfplan"
 terraform -chdir=02-customer-core output
 ```
 
@@ -138,26 +221,31 @@ Virtual hub provisioning can take a long time. Do not continue until the hub and
 
 ### 3. ISV return routing
 
-Copy the ISV workload subnet ID, customer VNet CIDR, and NVA frontend IP into `03-isv-routing/demo.tfvars`.
+Copy the ISV workload subnet ID, customer VNet CIDR, and NVA frontend IP into
+`03-isv-routing/${DEPLOYMENT_NAME}.tfvars`.
 
 ```bash
 terraform -chdir=03-isv-routing plan \
   -input=false \
-  -var-file=demo.tfvars \
-  -out=isv-routing.tfplan
-terraform -chdir=03-isv-routing apply -input=false isv-routing.tfplan
+  -var-file="$DEPLOYMENT_NAME.tfvars" \
+  -out="$DEPLOYMENT_NAME-isv-routing.tfplan"
+terraform -chdir=03-isv-routing apply \
+  -input=false "$DEPLOYMENT_NAME-isv-routing.tfplan"
 ```
 
 ### 4. Customer-managed ISV connection
 
-Copy the virtual hub ID and default route-table ID from `02-customer-core`, and the ISV VNet ID, ISV workload CIDR, and NVA frontend IP from `01-isv-core`, into `04-customer-connection/demo.tfvars`.
+Copy the virtual hub ID and default route-table ID from `02-customer-core`, and
+the ISV VNet ID, ISV workload CIDR, and NVA frontend IP from `01-isv-core`,
+into `04-customer-connection/${DEPLOYMENT_NAME}.tfvars`.
 
 ```bash
 terraform -chdir=04-customer-connection plan \
   -input=false \
-  -var-file=demo.tfvars \
-  -out=customer-connection.tfplan
-terraform -chdir=04-customer-connection apply -input=false customer-connection.tfplan
+  -var-file="$DEPLOYMENT_NAME.tfvars" \
+  -out="$DEPLOYMENT_NAME-customer-connection.tfplan"
+terraform -chdir=04-customer-connection apply \
+  -input=false "$DEPLOYMENT_NAME-customer-connection.tfplan"
 ```
 
 The ISV connection is created with `static_vnet_local_route_override_criteria = "Contains"`. Azure only supports this setting at connection creation; changing it replaces the connection.
@@ -189,10 +277,14 @@ Route output alone does not prove NVA traversal.
 Destroy in the reverse dependency order:
 
 ```bash
-terraform -chdir=04-customer-connection destroy -input=false -var-file=demo.tfvars
-terraform -chdir=03-isv-routing destroy -input=false -var-file=demo.tfvars
-terraform -chdir=02-customer-core destroy -input=false -var-file=demo.tfvars
-terraform -chdir=01-isv-core destroy -input=false -var-file=demo.tfvars
+terraform -chdir=04-customer-connection destroy \
+  -input=false -var-file="$DEPLOYMENT_NAME.tfvars"
+terraform -chdir=03-isv-routing destroy \
+  -input=false -var-file="$DEPLOYMENT_NAME.tfvars"
+terraform -chdir=02-customer-core destroy \
+  -input=false -var-file="$DEPLOYMENT_NAME.tfvars"
+terraform -chdir=01-isv-core destroy \
+  -input=false -var-file="$DEPLOYMENT_NAME.tfvars"
 ```
 
 Then verify that no billable resources remain:

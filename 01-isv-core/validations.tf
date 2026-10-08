@@ -1,10 +1,13 @@
 locals {
+  isv_forwarding_address_prefix = coalesce(var.isv_forwarding_address_prefix, var.workload_subnet_address_prefix)
+
   ipv4_cidrs = {
     virtual_network = var.virtual_network_address_space
     nva             = var.nva_subnet_address_prefix
     workload        = var.workload_subnet_address_prefix
     bastion         = var.bastion_subnet_address_prefix
     customer        = var.customer_address_prefix
+    forwarding      = local.isv_forwarding_address_prefix
   }
 
   ipv4_cidr_parts = {
@@ -91,6 +94,17 @@ variable "bastion_subnet_address_prefix" {
   }
 }
 
+variable "isv_forwarding_address_prefix" {
+  description = "Optional ISV traffic CIDR forwarded by the NVAs; defaults to the workload subnet."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.isv_forwarding_address_prefix == null || can(cidrnetmask(var.isv_forwarding_address_prefix))
+    error_message = "isv_forwarding_address_prefix must be null or a valid IPv4 CIDR."
+  }
+}
+
 variable "customer_address_prefix" {
   description = "IPv4 CIDR of the customer network that the NVAs forward."
   type        = string
@@ -121,13 +135,29 @@ variable "workload_vm_private_ip_address" {
   }
 }
 
-variable "nva_zones" {
-  description = "Two distinct availability zones for the NVA pair."
-  type        = list(string)
+variable "nva_vm_count" {
+  description = "Number of NVA virtual machines to deploy."
+  type        = number
+  default     = 2
 
   validation {
-    condition     = length(var.nva_zones) == 2 && length(distinct(var.nva_zones)) == 2 && alltrue([for zone in var.nva_zones : contains(["1", "2", "3"], zone)])
-    error_message = "nva_zones must contain exactly two distinct Azure availability zones (1, 2, or 3)."
+    condition     = var.nva_vm_count >= 1 && var.nva_vm_count <= 3 && floor(var.nva_vm_count) == var.nva_vm_count
+    error_message = "nva_vm_count must be an integer from 1 through 3."
+  }
+}
+
+variable "nva_zones" {
+  description = "Optional distinct availability zone for each NVA VM; null deploys all NVAs non-zonally."
+  type        = list(string)
+  default     = ["1", "2"]
+  nullable    = true
+
+  validation {
+    condition = var.nva_zones == null || (
+      length(var.nva_zones) > 0 &&
+      alltrue([for zone in var.nva_zones : contains(["1", "2", "3"], zone)])
+    )
+    error_message = "nva_zones must be null or a non-empty list containing only Azure availability zones 1, 2, or 3."
   }
 }
 
@@ -142,12 +172,14 @@ variable "health_probe_port" {
 }
 
 variable "workload_vm_zone" {
-  description = "Availability zone for the workload test VM."
+  description = "Optional availability zone for the workload test VM; null deploys it non-zonally."
   type        = string
+  default     = null
+  nullable    = true
 
   validation {
-    condition     = contains(["1", "2", "3"], var.workload_vm_zone)
-    error_message = "workload_vm_zone must be 1, 2, or 3."
+    condition     = var.workload_vm_zone == null || contains(["1", "2", "3"], var.workload_vm_zone)
+    error_message = "workload_vm_zone must be null or 1, 2, or 3."
   }
 }
 
@@ -173,6 +205,24 @@ variable "ssh_public_key_path" {
 
 resource "terraform_data" "input_validation" {
   lifecycle {
+    precondition {
+      condition = (
+        local.ipv4_cidr_ranges.forwarding.first >= local.ipv4_cidr_ranges.virtual_network.first &&
+        local.ipv4_cidr_ranges.forwarding.last <= local.ipv4_cidr_ranges.virtual_network.last &&
+        local.ipv4_cidr_ranges.forwarding.first <= local.ipv4_cidr_ranges.workload.first &&
+        local.ipv4_cidr_ranges.forwarding.last >= local.ipv4_cidr_ranges.workload.last
+      )
+      error_message = "The ISV forwarding prefix must be contained in the ISV VNet and include the workload subnet."
+    }
+
+    precondition {
+      condition = var.nva_zones == null || (
+        length(var.nva_zones) == var.nva_vm_count &&
+        length(distinct(var.nva_zones)) == length(var.nva_zones)
+      )
+      error_message = "When nva_zones is non-null, it must contain exactly nva_vm_count distinct zones."
+    }
+
     precondition {
       condition = alltrue([
         for subnet in ["nva", "workload", "bastion"] :

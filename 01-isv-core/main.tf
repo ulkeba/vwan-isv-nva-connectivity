@@ -91,7 +91,7 @@ resource "azurerm_network_security_group" "nva" {
     source_port_range          = "*"
     destination_port_range     = "*"
     source_address_prefix      = var.customer_address_prefix
-    destination_address_prefix = var.workload_subnet_address_prefix
+    destination_address_prefix = local.isv_forwarding_address_prefix
   }
 
   security_rule {
@@ -102,9 +102,10 @@ resource "azurerm_network_security_group" "nva" {
     protocol                   = "*"
     source_port_range          = "*"
     destination_port_range     = "*"
-    source_address_prefix      = var.workload_subnet_address_prefix
+    source_address_prefix      = local.isv_forwarding_address_prefix
     destination_address_prefix = var.customer_address_prefix
   }
+
 }
 
 resource "azurerm_network_security_group" "workload" {
@@ -291,12 +292,13 @@ module "nva_cluster" {
   subnet_id                   = azurerm_subnet.nva.id
   network_security_group_id   = null
   vm_size                     = var.nva_vm_size
+  instance_count              = var.nva_vm_count
   admin_username              = var.admin_username
   ssh_public_key              = file(pathexpand(var.ssh_public_key_path))
   zones                       = var.nva_zones
   frontend_private_ip_address = var.nva_frontend_private_ip_address
   customer_address_prefix     = var.customer_address_prefix
-  isv_workload_address_prefix = var.workload_subnet_address_prefix
+  isv_workload_address_prefix = local.isv_forwarding_address_prefix
   health_probe_port           = var.health_probe_port
 }
 

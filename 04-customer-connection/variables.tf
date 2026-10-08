@@ -25,7 +25,7 @@ variable "isv_virtual_network_id" {
 }
 
 variable "isv_workload_address_prefix" {
-  description = "ISV workload CIDR routed through the NVA."
+  description = "ISV destination CIDR routed through the NVA; may cover the full VNet."
   type        = string
 }
 
@@ -37,14 +37,4 @@ variable "nva_load_balancer_frontend_ip_address" {
 variable "associated_route_table_id" {
   description = "Hub route table ID associated with the ISV connection."
   type        = string
-}
-
-variable "propagated_route_table_ids" {
-  description = "Hub route table IDs receiving routes from the ISV connection."
-  type        = list(string)
-}
-
-variable "propagated_route_table_labels" {
-  description = "Hub route table labels receiving routes from the ISV connection."
-  type        = list(string)
 }

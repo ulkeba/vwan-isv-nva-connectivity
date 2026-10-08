@@ -2,11 +2,11 @@
 
 ## 1. Purpose
 
-Build a disposable Azure demo that proves traffic between a customer workload VNet and an ISV workload VNet can be routed transparently through an ISV-managed NVA pair.
+Build a disposable Azure demo that proves traffic between a customer workload VNet and an ISV workload VNet can be routed transparently through an ISV-managed NVA cluster.
 
 The demo has three business lifecycles implemented by four independently owned Terraform deployments:
 
-1. ISV core: ISV VNet, workload, NVA pair, load balancer, and management access.
+1. ISV core: ISV VNet, workload, NVA instances, load balancer, and management access.
 2. Customer core: Virtual WAN, customer workload VNet, and management access.
 3. Onboarding:
    - ISV routing: customer-specific UDR on the ISV workload subnet.
@@ -20,8 +20,8 @@ Terraform deploys the infrastructure. Cloud-init and systemd configure the Linux
 
 - One Azure region and one Virtual WAN virtual hub.
 - One customer workload VNet connected to the virtual hub.
-- Optional Azure Firewall with customer-only internet routing intent.
-- One ISV VNet with a workload subnet, an NVA subnet, and two zonal Linux forwarding VMs.
+- Optional Azure Firewall with Internet and optional Private Traffic Routing Intent.
+- One ISV VNet with a workload subnet, an NVA subnet, and one to three optionally zonal Linux forwarding VMs.
 - A Standard internal load balancer with an HA Ports rule as the stable NVA next hop.
 - One public IP per NVA for NVA-originated outbound connectivity.
 - Transparent routing without SNAT for traffic initiated in either direction.
@@ -31,7 +31,7 @@ Terraform deploys the infrastructure. Cloud-init and systemd configure the Linux
 
 ### Out of scope
 
-- Private Traffic routing intent, hub-integrated NVAs, ExpressRoute, VPN, ISV workload internet inspection, multi-hub routing, IPv6, DNS integration, and production firewall policy.
+- Hub-integrated NVAs, ExpressRoute, VPN, ISV workload internet inspection, multi-hub routing, IPv6, DNS integration, and production firewall policy.
 - VM scale sets, autoscaling, production hardening, patch management, and stateful firewall failover.
 - Cross-tenant authorization automation. The deployment identity must already have access to the required subscriptions.
 
@@ -39,7 +39,11 @@ Terraform deploys the infrastructure. Cloud-init and systemd configure the Linux
 
 ### AD-01: Use a spoke NVA
 
-The NVA pair runs in the ISV VNet. Virtual WAN connection-level static routes direct private traffic to the internal load-balancer frontend. Optional Internet Traffic routing intent applies only to customer workload internet traffic and does not alter the spoke-NVA private path.
+The NVA cluster runs in the ISV VNet. Virtual WAN connection-level static
+routes direct private traffic to the internal load-balancer frontend. Internet
+Traffic Routing Intent applies to customer workload internet traffic; optional
+Private Traffic Routing Intent also attracts private traffic and requires live
+path verification.
 
 Reference: [Static routes in Virtual WAN](https://learn.microsoft.com/azure/virtual-wan/static-routes)
 
@@ -47,7 +51,7 @@ Reference: [Static routes in Virtual WAN](https://learn.microsoft.com/azure/virt
 
 The customer-side connection deployment creates the ISV virtual hub connection with:
 
-- a static route for the ISV workload prefix;
+- a static route for the configured ISV destination prefix (the full VNet in BUC profiles);
 - the NVA load-balancer frontend as next-hop IP;
 - static-route propagation enabled;
 - caller-supplied associated and propagated hub route-table IDs or labels.
@@ -67,11 +71,16 @@ Azure only allows this property to be set when the connection is created. Changi
 
 Reference: [Bypass Next Hop IP for workloads within this VNet](https://learn.microsoft.com/azure/virtual-wan/howto-connect-vnet-hub#understanding-bypass-next-hop-ip-for-workloads-within-this-vnet)
 
-### AD-04: Use two individual zonal NVA VMs
+### AD-04: Use one to three individual NVA VMs
 
-Deploy two `azurerm_linux_virtual_machine` resources, one in each availability zone. A VM scale set adds orchestration unrelated to this routing demo and makes instance-level failover testing less explicit.
+Deploy one to three `azurerm_linux_virtual_machine` resources, with two
+instances by default. When `nva_zones` is non-null, each VM uses the
+corresponding distinct availability zone. When `nva_zones = null`, the VMs and
+their Standard public IPs are regional/non-zonal so the design can deploy in a
+region without Availability Zones. A VM scale set adds orchestration unrelated
+to this routing demo and makes instance-level failover testing less explicit.
 
-Each NVA has one NIC and one IP configuration. Both NICs join one Standard internal load-balancer backend pool with:
+Each NVA has one NIC and one IP configuration. Every NIC joins one Standard internal load-balancer backend pool with:
 
 - one private frontend IP in the NVA subnet;
 - one HA Ports rule with protocol `All` and ports `0`;
@@ -79,6 +88,9 @@ Each NVA has one NIC and one IP configuration. Both NICs join one Standard inter
 - one TCP health probe.
 
 Reference: [Azure Load Balancer HA Ports](https://learn.microsoft.com/azure/load-balancer/load-balancer-ha-ports-overview)
+
+Non-zonal instances retain load-balancer/instance redundancy when more than one
+NVA is deployed, but they do not provide explicit zone-failure isolation.
 
 ### AD-05: Enforce the ISV return path with a UDR
 
@@ -101,21 +113,25 @@ References:
 - [Azure Bastion overview](https://learn.microsoft.com/azure/bastion/bastion-overview)
 - [Connect with the Linux native client](https://learn.microsoft.com/azure/bastion/connect-vm-native-client-linux)
 
-### AD-07: Make customer internet filtering optional
+### AD-07: Make customer firewall routing optional
 
 `virtual_hub_deploy_firewall` conditionally deploys a Standard `AZFW_Hub`
 firewall, Firewall Policy, rules, and Internet Traffic routing intent. Only the
 customer workload connection enables Internet Security and learns
 `0.0.0.0/0` through Azure Firewall.
 
-Private routes remain more specific: customer-to-ISV traffic uses the
-`10.100.1.0/24` connection static route to the NVA, while return traffic uses
-the ISV workload `10.10.0.0/16` UDR to the NVA. Private Traffic routing intent
-is intentionally omitted.
+By default, Private Traffic routing intent is omitted. Private routes then
+use the connection static route to the NVA: `192.168.0.0/16` in BUC profiles,
+or the workload `/24` in older profiles. Return traffic uses the ISV workload
+`10.10.0.0/16` UDR to the NVA. `virtual_hub_route_private_traffic` optionally
+adds the Private Traffic policy. Root 04 no longer supplies an explicit
+propagated-route-table block; Azure control-plane acceptance and the resulting
+Firewall/NVA path require live verification.
 
-The demo policy allows `10.0.0.0/8` to `10.0.0.0/8`, allows HTTP/HTTPS to all
-FQDNs except `www.facebook.com`, and otherwise uses Azure Firewall's default
-deny.
+The demo policy allows traffic between the configured customer and ISV
+traffic prefixes, allows HTTP/HTTPS from either prefix to all FQDNs except
+`www.facebook.com`, and otherwise uses Azure Firewall's default deny. BUC
+profiles do not add separate infrastructure exclusions or deny collections.
 
 References:
 
@@ -124,7 +140,8 @@ References:
 
 ## 4. Demo address plan
 
-These values are supplied explicitly through each root's `demo.tfvars`; CIDR and IP variables have no Terraform defaults.
+These values are supplied explicitly through each root's
+`${DEPLOYMENT_NAME}.tfvars`; CIDR and IP variables have no Terraform defaults.
 
 | Network | Demo value |
 |---|---|
@@ -132,11 +149,18 @@ These values are supplied explicitly through each root's `demo.tfvars`; CIDR and
 | Customer VNet | `10.10.0.0/16` |
 | Customer workload subnet | `10.10.1.0/24` |
 | Customer Bastion subnet | `10.10.255.0/26` |
-| ISV VNet | `10.100.0.0/16` |
-| ISV NVA subnet | `10.100.0.0/24` |
-| NVA load-balancer frontend | `10.100.0.10` |
-| ISV workload subnet | `10.100.1.0/24` |
-| ISV Bastion subnet | `10.100.255.0/26` |
+| ISV VNet | `192.168.0.0/16` |
+| ISV NVA subnet | `192.168.0.0/24` |
+| NVA load-balancer frontend | `192.168.0.10` |
+| ISV workload subnet | `192.168.1.0/24` |
+| ISV Bastion subnet | `192.168.255.0/26` |
+
+BUC profiles use the full ISV VNet as the forwarding/routing prefix with no
+extra infrastructure exclusions. The physical workload subnet remains
+unchanged. Additional workload subnets require their own appropriate NSGs and customer return-path UDR
+association; infrastructure subnets must not receive that UDR.
+Absence of a subnet UDR does not prevent private traffic arriving from the hub:
+the aggregate route and local-route override still affect those destinations.
 
 Cross-input consistency checks belong in `validations.tf`, separate from the effective network configuration. They must reject overlaps, invalid containment, an NVA frontend outside the NVA subnet, and an invalid Bastion subnet prefix.
 
@@ -177,7 +201,7 @@ Tests must prove both directions independently. Connectivity alone does not prov
 |   `-- linux-nva-cluster/
 |-- 01-isv-core/
 |   |-- backend.tf
-|   |-- demo.tfvars
+|   |-- <deployment>.tfvars
 |   |-- main.tf
 |   |-- outputs.tf
 |   |-- providers.tf
@@ -185,7 +209,7 @@ Tests must prove both directions independently. Connectivity alone does not prov
 |   `-- variables.tf
 |-- 02-customer-core/
 |   |-- backend.tf
-|   |-- demo.tfvars
+|   |-- <deployment>.tfvars
 |   |-- main.tf
 |   |-- outputs.tf
 |   |-- providers.tf
@@ -193,7 +217,7 @@ Tests must prove both directions independently. Connectivity alone does not prov
 |   `-- variables.tf
 |-- 03-isv-routing/
 |   |-- backend.tf
-|   |-- demo.tfvars
+|   |-- <deployment>.tfvars
 |   |-- main.tf
 |   |-- outputs.tf
 |   |-- providers.tf
@@ -201,7 +225,7 @@ Tests must prove both directions independently. Connectivity alone does not prov
 |   `-- variables.tf
 |-- 04-customer-connection/
 |   |-- backend.tf
-|   |-- demo.tfvars
+|   |-- <deployment>.tfvars
 |   |-- main.tf
 |   |-- outputs.tf
 |   |-- providers.tf
@@ -246,9 +270,11 @@ No Azure resource may be managed by more than one state file.
 - ISV VNet ID;
 - ISV workload CIDR;
 - NVA load-balancer frontend IP;
-- associated and propagated hub route-table configuration.
+- associated hub route-table ID.
 
-CIDR and IP variables are required and have no default values. Commands use `-input=false -var-file=demo.tfvars` so missing values fail visibly.
+CIDR and IP variables are required and have no default values. Commands use
+`-input=false -var-file="$DEPLOYMENT_NAME.tfvars"` so missing values fail
+visibly.
 
 Resource names derive from two optional variables with defaults: `isv_prefix = "fd-isv"` and `customer_prefix = "fd-customer"`. Role components (`network`, `workload`, and `bastion`) and resource-type suffixes are fixed in the configuration. Individual resource names are not inputs.
 
@@ -276,7 +302,7 @@ Examples:
 - `customer_virtual_hub_firewall`: nullable firewall, policy, address, and routing-intent details.
 - `customer_workload_connection`: ID.
 - `isv_route_table`: ID and route details.
-- `isv_hub_connection`: ID and configured route-table IDs.
+- `isv_hub_connection`: ID, associated route-table ID, and static-route details.
 
 Only outputs needed by another root or by verification scripts are required. Do not output credentials or private keys.
 
@@ -285,14 +311,18 @@ Only outputs needed by another root or by verification scripts are required. Do 
 - Use a pinned Terraform version and pinned `azurerm` provider; commit dependency lock files.
 - Use `azurerm_virtual_hub_connection` for static routes, propagation, association, and `static_vnet_local_route_override_criteria`. AzAPI is not required.
 - Authenticate locally with Azure CLI.
-- Require subscription IDs, region, CIDRs, fixed IPs, VM size, zones, and admin username as inputs.
+- Require subscription IDs, region, CIDRs, fixed IPs, VM size, NVA count,
+  optional zones, and admin username as inputs.
 - Derive resource names from the optional `isv_prefix` and `customer_prefix` variables, whose defaults group the demo resources together in the portal.
-- Put deployment-specific demo values in `demo.tfvars`; keep the two naming-prefix defaults in `variables.tf`.
+- Put deployment-specific values in `${DEPLOYMENT_NAME}.tfvars`; keep the two
+  naming-prefix defaults in `variables.tf`.
 - Keep cross-input consistency checks in `validations.tf`.
 - Use SSH public-key authentication and disable passwords.
-- Do not assign public IPs to VMs.
+- Assign one Standard public IP to each NVA NIC for explicit outbound
+  connectivity; do not allow direct internet ingress.
 - Enable NIC IP forwarding on NVA NICs.
-- Deploy the two NVA VMs in separate availability zones; no availability-set fallback.
+- Deploy one to three NVA VMs, either in matching distinct availability zones
+  or non-zonally; no availability-set fallback.
 - Use Bash scripts compatible with WSL; no PowerShell scripts.
 - Add comments only for non-obvious routing behavior.
 - Add explicit dependencies only when Azure control-plane ordering requires them.
@@ -306,7 +336,7 @@ AzureRM reference: [azurerm_virtual_hub_connection](https://registry.terraform.i
 Cloud-init must:
 
 1. Enable IPv4 forwarding persistently.
-2. Allow forwarding only between the customer and ISV workload CIDRs.
+2. Allow forwarding only between the configured customer and ISV traffic CIDRs.
 3. Avoid masquerade/SNAT between those prefixes.
 4. Start a systemd socket/service for the load-balancer TCP health probe.
 5. Expose forwarding counters for verification.
@@ -321,7 +351,7 @@ NSGs must allow:
 
 ## 10. Implementation sequence
 
-1. Deploy `01-isv-core` and verify both NVA backends are healthy.
+1. Deploy `01-isv-core` and verify all NVA backends are healthy.
 2. Deploy `02-customer-core` and wait for the virtual hub and workload connection to succeed.
 3. Deploy `03-isv-routing` to establish the return path before exposing connectivity.
 4. Deploy `04-customer-connection` and wait for route convergence.

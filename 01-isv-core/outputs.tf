@@ -45,7 +45,7 @@ output "nva_load_balancer" {
 }
 
 output "nva_virtual_machines" {
-  description = "NVA virtual machine details used during failover verification."
+  description = "NVA virtual machine details used during routing and failover verification."
   value       = module.nva_cluster.virtual_machines
 }
 
@@ -56,6 +56,7 @@ output "isv_workload_virtual_machine" {
     name               = module.workload_vm.name
     nic_id             = module.workload_vm.nic_id
     private_ip_address = module.workload_vm.private_ip_address
+    admin_username     = var.admin_username
   }
 }
 

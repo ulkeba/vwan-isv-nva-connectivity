@@ -2,9 +2,9 @@ locals {
   testing_tools = yamldecode(file("${path.module}/../../cloud-init/testing-tools.yaml"))
 
   instances = {
-    for index, zone in var.zones : tostring(index) => {
+    for index in range(var.instance_count) : tostring(index) => {
       name = "${var.name_prefix}-${index + 1}-vm"
-      zone = zone
+      zone = var.zones == null ? null : try(var.zones[index], null)
     }
   }
 
@@ -72,7 +72,7 @@ resource "azurerm_public_ip" "this" {
   resource_group_name = var.resource_group_name
   allocation_method   = "Static"
   sku                 = "Standard"
-  zones               = [each.value.zone]
+  zones               = each.value.zone == null ? null : [each.value.zone]
 
   lifecycle {
     ignore_changes = [ip_tags]

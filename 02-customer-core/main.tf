@@ -97,6 +97,7 @@ resource "azurerm_network_security_group" "workload" {
     source_address_prefix      = var.isv_workload_address_prefix
     destination_address_prefix = var.customer_workload_subnet_prefix
   }
+
 }
 
 resource "azurerm_network_security_group" "bastion" {
@@ -263,11 +264,6 @@ resource "azurerm_virtual_hub_connection" "customer_workload" {
 
   routing {
     associated_route_table_id = azurerm_virtual_hub.customer.default_route_table_id
-
-    propagated_route_table {
-      labels          = ["default"]
-      route_table_ids = [azurerm_virtual_hub.customer.default_route_table_id]
-    }
   }
 
   timeouts {
@@ -296,15 +292,15 @@ resource "azurerm_firewall_policy_rule_collection_group" "customer" {
   priority           = 100
 
   network_rule_collection {
-    name     = "allow-private-10"
+    name     = "allow-private"
     priority = 100
     action   = "Allow"
 
     rule {
-      name                  = "allow-10-to-10"
+      name                  = "allow-private-to-private"
       protocols             = ["Any"]
-      source_addresses      = ["10.0.0.0/8"]
-      destination_addresses = ["10.0.0.0/8"]
+      source_addresses      = [var.customer_virtual_network_address_space, var.isv_workload_address_prefix]
+      destination_addresses = [var.customer_virtual_network_address_space, var.isv_workload_address_prefix]
       destination_ports     = ["*"]
     }
   }
@@ -316,7 +312,7 @@ resource "azurerm_firewall_policy_rule_collection_group" "customer" {
 
     rule {
       name              = "deny-www-facebook-com"
-      source_addresses  = ["10.0.0.0/8"]
+      source_addresses  = [var.customer_virtual_network_address_space, var.isv_workload_address_prefix]
       destination_fqdns = ["www.facebook.com"]
 
       protocols {
@@ -338,7 +334,7 @@ resource "azurerm_firewall_policy_rule_collection_group" "customer" {
 
     rule {
       name              = "allow-http-https"
-      source_addresses  = ["10.0.0.0/8"]
+      source_addresses  = [var.customer_virtual_network_address_space, var.isv_workload_address_prefix]
       destination_fqdns = ["*"]
 
       protocols {
@@ -379,6 +375,33 @@ resource "azurerm_firewall" "customer" {
   depends_on = [azurerm_virtual_hub_connection.customer_workload]
 }
 
+resource "azurerm_log_analytics_workspace" "customer_firewall" {
+  count = var.virtual_hub_deploy_firewall ? 1 : 0
+
+  name                = "${local.network_prefix}-fw-law"
+  resource_group_name = azurerm_resource_group.network.name
+  location            = azurerm_resource_group.network.location
+  sku                 = "PerGB2018"
+  retention_in_days   = 30
+}
+
+resource "azurerm_monitor_diagnostic_setting" "customer_firewall" {
+  count = var.virtual_hub_deploy_firewall ? 1 : 0
+
+  name                           = "${local.network_prefix}-fw-diagnostics"
+  target_resource_id             = azurerm_firewall.customer[0].id
+  log_analytics_workspace_id     = azurerm_log_analytics_workspace.customer_firewall[0].id
+  log_analytics_destination_type = "Dedicated"
+
+  enabled_log {
+    category = "AZFWNetworkRule"
+  }
+
+  enabled_log {
+    category = "AZFWFlowTrace"
+  }
+}
+
 resource "azurerm_virtual_hub_routing_intent" "customer_internet" {
   count = var.virtual_hub_deploy_firewall ? 1 : 0
 
@@ -389,6 +412,16 @@ resource "azurerm_virtual_hub_routing_intent" "customer_internet" {
     name         = "InternetTraffic"
     destinations = ["Internet"]
     next_hop     = azurerm_firewall.customer[0].id
+  }
+
+  dynamic "routing_policy" {
+    for_each = var.virtual_hub_route_private_traffic ? [true] : []
+
+    content {
+      name         = "PrivateTraffic"
+      destinations = ["PrivateTraffic"]
+      next_hop     = azurerm_firewall.customer[0].id
+    }
   }
 
   timeouts {

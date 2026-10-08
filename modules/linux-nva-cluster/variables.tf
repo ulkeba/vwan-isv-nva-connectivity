@@ -45,28 +45,40 @@ variable "health_probe_port" {
   }
 }
 
-variable "zones" {
-  description = "Two distinct availability zones for the NVA VMs."
-  type        = list(string)
+variable "instance_count" {
+  description = "Number of NVA instances to deploy."
+  type        = number
+  default     = 2
 
   validation {
-    condition     = length(var.zones) == 2 && length(distinct(var.zones)) == 2
-    error_message = "zones must contain exactly two distinct availability zones."
+    condition     = var.instance_count >= 1 && var.instance_count <= 3 && floor(var.instance_count) == var.instance_count
+    error_message = "instance_count must be an integer from 1 through 3."
   }
+}
+
+variable "zones" {
+  description = "Optional distinct availability zone for each NVA VM; null deploys all instances non-zonally."
+  type        = list(string)
+  default     = ["1", "2"]
+  nullable    = true
 
   validation {
-    condition     = alltrue([for zone in var.zones : contains(["1", "2", "3"], zone)])
-    error_message = "Each NVA zone must be one of \"1\", \"2\", or \"3\"."
+    condition = var.zones == null || (
+      length(var.zones) == var.instance_count &&
+      length(distinct(var.zones)) == length(var.zones) &&
+      alltrue([for zone in var.zones : contains(["1", "2", "3"], zone)])
+    )
+    error_message = "zones must be null or contain exactly instance_count distinct values chosen from \"1\", \"2\", and \"3\"."
   }
 }
 
 variable "vm_size" {
-  description = "Azure VM size used by both NVA instances."
+  description = "Azure VM size used by the NVA instances."
   type        = string
 }
 
 variable "admin_username" {
-  description = "Local administrator username for both NVA instances."
+  description = "Local administrator username for the NVA instances."
   type        = string
 }
 
@@ -86,7 +98,7 @@ variable "customer_address_prefix" {
 }
 
 variable "isv_workload_address_prefix" {
-  description = "ISV workload IPv4 CIDR allowed through the NVA."
+  description = "ISV traffic IPv4 CIDR allowed through the NVA."
   type        = string
 
   validation {
@@ -96,7 +108,7 @@ variable "isv_workload_address_prefix" {
 }
 
 variable "source_image_reference" {
-  description = "Marketplace image used for both NVA instances."
+  description = "Marketplace image used for the NVA instances."
   type = object({
     publisher = string
     offer     = string
