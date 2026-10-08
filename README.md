@@ -48,7 +48,7 @@ See [architecture.svg](diagrams/architecture.svg) for the rendered topology and 
   chmod 644 ~/.ssh/fd-fwaas-demo.pub
   ```
 
-The checked-in demo values target Sweden Central and use:
+The checked-in demo values use:
 
 | Network | Prefix |
 |---|---|
@@ -67,11 +67,11 @@ az account show --query '{name:name,id:id,tenantId:tenantId}' -o table
 az provider show --namespace Microsoft.Network --query registrationState -o tsv
 az provider show --namespace Microsoft.Compute --query registrationState -o tsv
 az vm list-skus \
-  --location swedencentral \
-  --size Standard_B2s \
+  --location "<azure-region>" \
+  --size "<vm-size>" \
   --resource-type virtualMachines \
   --all \
-  --query "[?name=='Standard_B2s'].{zones:locationInfo[0].zones,restrictions:restrictions}" \
+  --query "[?name=='<vm-size>'].{zones:locationInfo[0].zones,restrictions:restrictions}" \
   -o json
 ```
 
@@ -91,7 +91,7 @@ Set one deployment name for the entire shell session. The name identifies the
 tfvars file and Terraform workspace in every root:
 
 ```bash
-export DEPLOYMENT_NAME=swedencentral
+export DEPLOYMENT_NAME=demo
 export TF_WORKSPACE="$DEPLOYMENT_NAME"
 export EVIDENCE_DIR="${EVIDENCE_DIR:-evidence_$DEPLOYMENT_NAME}"
 ```
@@ -100,27 +100,18 @@ export EVIDENCE_DIR="${EVIDENCE_DIR:-evidence_$DEPLOYMENT_NAME}"
 and it must not begin with a hyphen. Every root must contain a non-empty
 `${DEPLOYMENT_NAME}.tfvars`. `TF_WORKSPACE` keeps workspace selection local to
 the current shell, so different deployments can run concurrently without
-changing shared CLI workspace selection. The checked-in deployment sets are:
-
-| `DEPLOYMENT_NAME` | Region | Routing mode |
-|---|---|---|
-| `swedencentral` | Sweden Central | Azure Firewall, Internet Traffic Routing Intent only |
-| `ri-swedencentral` | Sweden Central | Azure Firewall, Internet and Private Traffic Routing Intent |
-| `ri-centralus` | Central US | Azure Firewall, Internet and Private Traffic Routing Intent |
-| `buc-nori-cin` | Central India | No Azure Firewall or Routing Intent; one non-zonal NVA |
-| `buc-nori-wcus` | West Central US | Azure Firewall, Internet and Private Traffic Routing Intent; one non-zonal NVA |
-| `buc-nori-gwc` | Germany West Central | Azure Firewall, Internet and Private Traffic Routing Intent; one non-zonal NVA |
-
-The three BUC profiles include matching `env_<DEPLOYMENT_NAME>.sh` files.
-Source one from the repository root to set `AZURE_CONFIG_DIR`,
-`DEPLOYMENT_NAME`, `TF_WORKSPACE`, and `EVIDENCE_DIR`.
+changing shared CLI workspace selection. The checked-in `demo` deployment uses
+`demo.tfvars` in each root. Source `env_demo.sh` from the repository root to
+set `AZURE_CONFIG_DIR`, `DEPLOYMENT_NAME`, `TF_WORKSPACE`, and `EVIDENCE_DIR`.
 
 Set the same subscription ID in all four files for the chosen deployment and
 review address prefixes, VM sizes, zones, usernames, the SSH public-key path,
 and copied cross-root IDs. Resource names derive from the optional `isv_prefix`
 and `customer_prefix` variables. If overriding a prefix, use the same
 `isv_prefix` in roots 01 and 03 and the same `customer_prefix` in roots 02 and
-04.
+04. The `demo` profile uses the placeholder subscription ID
+`00000000-0000-0000-0000-000000000000`; replace it in all four files,
+including the copied cross-root IDs, before deployment.
 
 `01-isv-core` accepts `nva_vm_count` values from `1` through `3` and defaults
 to `2`. `nva_zones` defaults to `["1", "2"]`. Set `nva_zones = null` to
@@ -130,10 +121,9 @@ inputs also accept `null`. A one-NVA deployment cannot demonstrate load
 balancer failover, and non-zonal instances do not provide zone-failure
 isolation.
 
-The three BUC profiles route and permit ISV traffic across
-`192.168.0.0/16` without extra infrastructure exclusions. In root 01,
-`isv_forwarding_address_prefix` selects this broader forwarding range; leaving
-it unset preserves workload-subnet-only forwarding.
+`isv_forwarding_address_prefix` in root 01 can select a forwarding range
+broader than the physical workload subnet; leaving it unset preserves
+workload-subnet-only forwarding.
 The existing `isv_workload_address_prefix` input in roots 02 and 04 denotes
 the permitted/routed range, not the physical workload subnet.
 

@@ -26,11 +26,14 @@ override.tf.json
 .terraformrc
 terraform.rc
 
-# Local variable files. Checked-in demo.tfvars files remain trackable.
-local.tfvars
-local.tfvars.json
-*.local.tfvars
-*.local.tfvars.json
+# Environment configuration. Only the sanitized demo files are trackable.
+*.tfvars
+*.tfvars.json
+!demo.tfvars
+env_*.sh
+!env_demo.sh
+
+# Automatically loaded variable files are always local.
 *.auto.tfvars
 *.auto.tfvars.json
 

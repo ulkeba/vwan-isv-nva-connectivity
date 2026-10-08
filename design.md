@@ -51,7 +51,7 @@ Reference: [Static routes in Virtual WAN](https://learn.microsoft.com/azure/virt
 
 The customer-side connection deployment creates the ISV virtual hub connection with:
 
-- a static route for the configured ISV destination prefix (the full VNet in BUC profiles);
+- a static route for the configured ISV destination prefix;
 - the NVA load-balancer frontend as next-hop IP;
 - static-route propagation enabled;
 - caller-supplied associated and propagated hub route-table IDs or labels.
@@ -121,17 +121,17 @@ customer workload connection enables Internet Security and learns
 `0.0.0.0/0` through Azure Firewall.
 
 By default, Private Traffic routing intent is omitted. Private routes then
-use the connection static route to the NVA: `192.168.0.0/16` in BUC profiles,
-or the workload `/24` in older profiles. Return traffic uses the ISV workload
-`10.10.0.0/16` UDR to the NVA. `virtual_hub_route_private_traffic` optionally
-adds the Private Traffic policy. Root 04 no longer supplies an explicit
-propagated-route-table block; Azure control-plane acceptance and the resulting
-Firewall/NVA path require live verification.
+use the connection static route for the configured ISV destination prefix.
+Return traffic uses the ISV workload UDR for the configured customer address
+prefix. `virtual_hub_route_private_traffic` optionally adds the Private Traffic
+policy. Root 04 does not supply an explicit propagated-route-table block;
+Azure control-plane acceptance and the resulting Firewall/NVA path require
+live verification.
 
 The demo policy allows traffic between the configured customer and ISV
 traffic prefixes, allows HTTP/HTTPS from either prefix to all FQDNs except
-`www.facebook.com`, and otherwise uses Azure Firewall's default deny. BUC
-profiles do not add separate infrastructure exclusions or deny collections.
+`www.facebook.com`, and otherwise uses Azure Firewall's default deny. It does
+not add separate infrastructure exclusions or deny collections.
 
 References:
 
@@ -155,10 +155,10 @@ These values are supplied explicitly through each root's
 | ISV workload subnet | `192.168.1.0/24` |
 | ISV Bastion subnet | `192.168.255.0/26` |
 
-BUC profiles use the full ISV VNet as the forwarding/routing prefix with no
-extra infrastructure exclusions. The physical workload subnet remains
-unchanged. Additional workload subnets require their own appropriate NSGs and customer return-path UDR
-association; infrastructure subnets must not receive that UDR.
+The forwarding and routing inputs may cover the full ISV VNet while the
+physical workload subnet remains unchanged. Additional workload subnets
+require their own appropriate NSGs and customer return-path UDR association;
+infrastructure subnets must not receive that UDR.
 Absence of a subnet UDR does not prevent private traffic arriving from the hub:
 the aggregate route and local-route override still affect those destinations.
 

@@ -173,12 +173,12 @@ prefix to `$NVA_LOAD_BALANCER_FRONTEND_IP`, and NVA 1 can route the customer
 prefix through the hub. Routes support the traffic evidence; they do not
 replace it.
 
-After applying the full-prefix configuration, BUC static routes use
-`192.168.0.0/16` while the workload subnet stays `192.168.1.0/24`.
-No additional infrastructure deny rules are configured. Keep the return-path
-UDR off the NVA and Bastion subnets, but do not treat that as an ingress filter.
-The full connection route can affect hub traffic addressed to their private
-IPs; ordinary Bastion public access and local SSH use a different path.
+When the configured ISV destination prefix covers the full VNet, the physical
+workload subnet remains unchanged. No additional infrastructure deny rules are
+configured. Keep the return-path UDR off the NVA and Bastion subnets, but do
+not treat that as an ingress filter. The full connection route can affect hub
+traffic addressed to their private IPs; ordinary Bastion public access and
+local SSH use a different path.
 
 With Internet Traffic Routing Intent only, confirm that the customer workload
 NIC learns `0.0.0.0/0` through Azure Firewall while private routes retain the
