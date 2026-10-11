@@ -215,7 +215,7 @@ Keep the ISV listener and NVA capture running while following Firewall logs. Res
 
 Use the **separate local Firewall terminal initialized in section 2**. Do not run these commands inside a Bastion SSH session. The query uses actual resource IDs and workload IPs from that terminal's environment.
 
-Skip this section when Firewall is disabled. Install `watch` if needed; on macOS with Homebrew, use `brew install watch`. The Azure CLI `log-analytics` extension is also required. Flow Trace additionally needs `AFWEnableTcpConnectionLogging`; see [logging troubleshooting](#firewall-logs-are-missing).
+Skip this section when Firewall is disabled. Install `watch` if needed; on macOS with Homebrew, use `brew install watch`. The Azure CLI `log-analytics` extension is also required; see [logging troubleshooting](#firewall-logs-are-missing).
 
 ```zsh
 if [[ -z "${CUSTOMER_FIREWALL_ID:-}" || -z "${CUSTOMER_FIREWALL_LOG_ANALYTICS_WORKSPACE_ID:-}" || -z "${CUSTOMER_WORKLOAD_PRIVATE_IP:-}" || -z "${ISV_WORKLOAD_PRIVATE_IP:-}" ]]; then
@@ -236,25 +236,13 @@ Resolve any errors above before constructing the query and starting the monitor:
 
 ```zsh
 export FIREWALL_TCP_QUERY="
-union isfuzzy=true
-(
-    AZFWNetworkRule
-    | where TimeGenerated > ago(30m) and _ResourceId =~ '$CUSTOMER_FIREWALL_ID'
-    | where SourceIp == '$CUSTOMER_WORKLOAD_PRIVATE_IP'
-        and DestinationIp == '$ISV_WORKLOAD_PRIVATE_IP' and DestinationPort == 2000
-    | project TimeGenerated, RecordType = 'NetworkRule', SourceIp, SourcePort,
-        DestinationIp, DestinationPort, Protocol, Action,
-        Detail = strcat(RuleCollection, '/', Rule)
-),
-(
-    AZFWFlowTrace
-    | where TimeGenerated > ago(30m) and _ResourceId =~ '$CUSTOMER_FIREWALL_ID'
-    | where SourceIp == '$CUSTOMER_WORKLOAD_PRIVATE_IP'
-        and DestinationIp == '$ISV_WORKLOAD_PRIVATE_IP' and DestinationPort == 2000
-    | project TimeGenerated, RecordType = 'FlowTrace', SourceIp, SourcePort,
-        DestinationIp, DestinationPort, Protocol, Action,
-        Detail = strcat(Flag, ' ', ActionReason)
-)
+AZFWNetworkRule
+| where TimeGenerated > ago(30m) and _ResourceId =~ '$CUSTOMER_FIREWALL_ID'
+| where SourceIp == '$CUSTOMER_WORKLOAD_PRIVATE_IP'
+    and DestinationIp == '$ISV_WORKLOAD_PRIVATE_IP' and DestinationPort == 2000
+| project TimeGenerated, RecordType = 'NetworkRule', SourceIp, SourcePort,
+    DestinationIp, DestinationPort, Protocol, Action,
+    Detail = strcat(RuleCollection, '/', Rule)
 | order by TimeGenerated asc
 "
 watch -n 10 -x az monitor log-analytics query \
@@ -265,7 +253,7 @@ watch -n 10 -x az monitor log-analytics query \
 
 `watch` refreshes the table every ten seconds; `-x` passes the multiline query directly to Azure CLI without another shell interpreting it. Leave this monitor running and resend the message from the customer terminal. Keep the ISV listener and NVA capture running in their own terminals. Press `Ctrl+C` in each terminal to stop its monitor, capture, or listener when finished.
 
-New diagnostic settings can take up to 30 minutes to start delivering logs. A network-rule record proves a Firewall policy decision; Flow Trace adds TCP lifecycle details. Neither proves NVA traversal. Empty results do not prove Firewall bypass, and missing-table/query errors are not successful empty results. Correlate timestamps and flow tuples with the NVA capture.
+New diagnostic settings can take up to 30 minutes to start delivering logs. A network-rule record shows the Firewall policy decision, not NVA traversal. Empty results do not prove Firewall bypass, and missing-table/query errors are not successful empty results. Correlate timestamps and flow tuples with the NVA capture.
 
 ## Troubleshooting
 
@@ -344,14 +332,7 @@ az network firewall show \
 az resource show \
   --ids "$CUSTOMER_FIREWALL_ROUTING_INTENT_ID" \
   -o json > "$EVIDENCE_DIR/customer-firewall-routing-intent.json"
-az feature show \
-  --namespace Microsoft.Network \
-  --name AFWEnableTcpConnectionLogging \
-  --query properties.state \
-  -o tsv
 ```
-
-Flow Trace requires the feature state `Registered`. Have the subscription owner enable it using the [Flow Trace procedure](https://learn.microsoft.com/azure/firewall/monitor-firewall-reference#flow-trace). Network-rule logs are useful without Flow Trace. An API permission error is not evidence that the feature is disabled.
 
 If the CLI query command is unavailable, install its extension:
 

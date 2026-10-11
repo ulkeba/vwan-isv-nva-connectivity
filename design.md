@@ -98,7 +98,7 @@ Only the customer workload connection enables Internet Security. The ISV connect
 
 **Routing limitation:** Microsoft documents that Routing Intent can override the bypass setting when static routes are propagated. Traffic for the connected VNet may then bypass the spoke next-hop IP even with `Contains`. Do not assume an NVA path solely from that setting or from a successful TCP connection. Inspect NVA ingress/egress packet captures for the chosen mode; use effective-route diagnostics when troubleshooting.
 
-The demo Firewall policy permits traffic between configured customer/ISV prefixes, permits HTTP/HTTPS except `www.facebook.com`, and otherwise uses default deny. It is not a production policy and has no separate infrastructure exclusions. Diagnostics send `AZFWNetworkRule` and `AZFWFlowTrace` to Log Analytics; Flow Trace additionally requires the subscription feature described in the verification guide.
+The demo Firewall policy permits traffic between configured customer/ISV prefixes, permits HTTP/HTTPS except `www.facebook.com`, and otherwise uses default deny. It is not a production policy and has no separate infrastructure exclusions. Diagnostics send `AZFWNetworkRule` and `AZFWFlowTrace` to Log Analytics; the verification guide queries only network-rule logs. Optional Flow Trace logging requires the [additional subscription feature](https://learn.microsoft.com/azure/firewall/monitor-firewall-reference#flow-trace).
 
 ## NVA forwarding and availability
 
