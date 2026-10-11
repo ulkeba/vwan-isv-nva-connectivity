@@ -29,6 +29,8 @@ Each root owns separate local state. No resource is managed by two roots, and ro
 | Effective-route troubleshooting | [show-effective-routes.sh](scripts/show-effective-routes.sh) |
 | Reference topology | [architecture.svg](diagrams/architecture.svg), [architecture.drawio](diagrams/architecture.drawio) |
 
+The diagram labels workload VMs with the demo's static private IPs; NVA private IPs are dynamically assigned and shown only as examples. Azure service icons are embedded from the [official Microsoft icon set](https://learn.microsoft.com/azure/architecture/icons/), under its architecture-diagram usage terms.
+
 Terraform and AzureRM versions are pinned in each root's `providers.tf`. Reusable modules have no backend configuration. The implementation history remains in [implementation-log.md](docs/implementation-log.md).
 
 ## Address and naming contracts
