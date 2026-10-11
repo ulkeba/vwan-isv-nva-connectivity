@@ -13,7 +13,7 @@ resource "azurerm_virtual_hub_connection" "isv" {
     # This property corresponds to the option "Bypass Next Hop IP for workloads within this VNet" in the Azure portal.
     # "Contains": corresponds to "No"
     # "Equal": corresponds to "Yes"
-    static_vnet_local_route_override_criteria = "Equal"
+    static_vnet_local_route_override_criteria = "Contains"
 
     # This property corresponds to the option "Propagate static route" in the Azure portal.
     static_vnet_propagate_static_routes_enabled = true

@@ -1,433 +1,119 @@
-# Verification runbook
+# Interactive flow inspection
 
-This is a linear copy/paste runbook for proving route convergence, NVA
-traversal, source-address preservation, and single-NVA failover.
+Use this guide after the four deployments in [README.md](../README.md#deploy):
 
-## Prerequisites
+1. Load the deployment environment.
+2. Inspect a customer-initiated TCP flow on the NVA and workload VMs.
+3. Follow Azure Firewall logs when Firewall is enabled.
 
-Install `jq`, Terraform, Azure CLI, the Azure CLI `log-analytics` extension,
-and OpenSSH. Sign in with `az login`, apply all four Terraform roots, and make
-sure the demo SSH private key is readable.
+The walkthrough keeps all VMs running and does not change routing. If something fails, use [Troubleshooting](#troubleshooting).
 
-On Ubuntu or WSL, install `jq` with:
+## 1. Load the environment
 
-```bash
-sudo apt-get update
-sudo apt-get install -y jq
-az extension add --name log-analytics --allow-preview true
-```
+Run locally from the repository root in the **Zsh session** used for deployment. This step captures the output files that each terminal will load in section 2.
 
-Run **every command below from the repository root in one ongoing interactive
-Bash or zsh shell**. Do not change shells partway through: `environment.sh` is
-sourced once and its variables are used by all later commands. Sourcing uses
-the current shell, not the script's shebang.
+### Prechecks
 
-## 1. Capture deployment outputs and load variables
+Run these checks first. They are independent checks, not an automatically aborting script: **resolve every reported error before running the collection sequence below**.
 
-The four JSON files are the initial deployment evidence. `environment.sh`
-reads these exact paths with `jq`.
-
-```bash
-: "${DEPLOYMENT_NAME:?Set DEPLOYMENT_NAME before capturing outputs}"
-: "${TF_WORKSPACE:?Set TF_WORKSPACE to DEPLOYMENT_NAME before capturing outputs}"
-test "$TF_WORKSPACE" = "$DEPLOYMENT_NAME"
-case "$DEPLOYMENT_NAME" in
-  ""|[![:alnum:]]*|*[![:alnum:]_-]*)
-    printf 'Invalid DEPLOYMENT_NAME: %s\n' "$DEPLOYMENT_NAME" >&2
-    exit 1
-    ;;
-esac
-
-test -f ./environment.sh
-test -x ./scripts/show-effective-routes.sh
-test -x ./scripts/show-nva-counters.sh
-test -x ./scripts/test-connectivity.sh
-command -v jq
-az extension show --name log-analytics > /dev/null
+```zsh
+set -o pipefail
 export EVIDENCE_DIR="${EVIDENCE_DIR:-evidence_$DEPLOYMENT_NAME}"
-mkdir -p "$EVIDENCE_DIR"
+export SSH_KEY="${SSH_KEY:-$HOME/.ssh/fd-fwaas-demo}"
 
+for tool in terraform az jq ssh; do
+  if ! command -v "$tool" >/dev/null; then
+    printf 'ERROR: %s is missing. Install it and add it to PATH before collecting outputs.\n' "$tool" >&2
+    false
+  fi
+done
+if [[ -z "${DEPLOYMENT_NAME:-}" || ! "$DEPLOYMENT_NAME" =~ ^[[:alnum:]][[:alnum:]_-]*$ ]]; then
+  printf 'ERROR: Missing or invalid DEPLOYMENT_NAME. Set it to the local deployment name used for apply.\n' >&2
+  false
+fi
+if [[ -z "${TF_WORKSPACE:-}" || "$TF_WORKSPACE" != "${DEPLOYMENT_NAME:-}" ]]; then
+  printf 'ERROR: TF_WORKSPACE="%s" must match DEPLOYMENT_NAME="%s". Run: export TF_WORKSPACE="$DEPLOYMENT_NAME"\n' "${TF_WORKSPACE:-<unset>}" "${DEPLOYMENT_NAME:-<unset>}" >&2
+  false
+fi
+if [[ ! -f ./environment.sh ]]; then
+  printf 'ERROR: environment.sh is missing in %s. Change to the repository root before continuing.\n' "$PWD" >&2
+  false
+fi
 for root in 01-isv-core 02-customer-core 03-isv-routing 04-customer-connection; do
-  test -s "$root/$DEPLOYMENT_NAME.tfvars"
+  if [[ ! -s "$root/$DEPLOYMENT_NAME.tfvars" ]]; then
+    printf 'ERROR: Missing or empty %s/%s.tfvars. Restore the local configuration used for this deployment.\n' "$root" "$DEPLOYMENT_NAME" >&2
+    false
+  fi
 done
-
-terraform -chdir=01-isv-core output -json > "$EVIDENCE_DIR/01-isv-core.json"
-terraform -chdir=02-customer-core output -json > "$EVIDENCE_DIR/02-customer-core.json"
-terraform -chdir=03-isv-routing output -json > "$EVIDENCE_DIR/03-isv-routing.json"
-terraform -chdir=04-customer-connection output -json > "$EVIDENCE_DIR/04-customer-connection.json"
-
-source ./environment.sh
-test -r "$SSH_KEY"
-
-NVA_COUNTER_ARGS=()
-for nva_vm_id in "${NVA_VM_IDS[@]}"; do
-  NVA_COUNTER_ARGS+=(--nva-vm-id "$nva_vm_id")
-done
-unset nva_vm_id
+if [[ ! -r "$SSH_KEY" ]]; then
+  printf 'ERROR: SSH key "%s" is not readable. Set SSH_KEY to the private key matching the deployed public key.\n' "$SSH_KEY" >&2
+  false
+fi
 ```
 
-The stage 01 and 02 evidence files are required. Stage 03 and 04 variables are
-loaded when their evidence files become available, so the environment can be
-sourced between Terraform stages. Source the file again after capturing
-additional stage outputs.
+### Collect outputs and load the environment
 
-To print file checks, skipped stages, validation phases, and export progress
-while loading the environment, enable debug output:
+Run this sequence only after all prechecks pass. Each progress line identifies the root being captured; `&&` prevents further collection and environment loading if an operation fails.
 
-```bash
-ENVIRONMENT_DEBUG=1 source ./environment.sh
+```zsh
+if mkdir -p "$EVIDENCE_DIR" &&
+  printf 'Collecting 01-isv-core outputs\n' &&
+  terraform -chdir=01-isv-core output -json > "$EVIDENCE_DIR/01-isv-core.json" &&
+  printf 'Collecting 02-customer-core outputs\n' &&
+  terraform -chdir=02-customer-core output -json > "$EVIDENCE_DIR/02-customer-core.json" &&
+  printf 'Collecting 03-isv-routing outputs\n' &&
+  terraform -chdir=03-isv-routing output -json > "$EVIDENCE_DIR/03-isv-routing.json" &&
+  printf 'Collecting 04-customer-connection outputs\n' &&
+  terraform -chdir=04-customer-connection output -json > "$EVIDENCE_DIR/04-customer-connection.json"; then
+  if source ./environment.sh; then
+    printf 'Customer workload IP: %s\nISV workload IP: %s\n' \
+      "$CUSTOMER_WORKLOAD_PRIVATE_IP" "$ISV_WORKLOAD_PRIVATE_IP"
+  else
+    printf 'ERROR: Environment loading failed. Resolve the loader messages above and check the captured JSON for this deployment.\n' >&2
+    false
+  fi
+else
+  printf 'ERROR: Output collection failed. Check the last reported root, its workspace/applied state, and evidence-directory permissions before retrying.\n' >&2
+  false
+fi
 ```
 
-The administrator usernames are loaded from the Terraform output JSON. Record
-them with the active Azure account:
+`environment.sh` loads resource IDs, usernames, and NVA variables from the captured JSON. It uses the `SSH_KEY` path checked above. Stop on errors, correct the reported problem, and rerun the failed sequence; none of these commands closes your terminal.
 
-```bash
-az account show \
-  --subscription "$AZURE_SUBSCRIPTION" \
-  --output json > "$EVIDENCE_DIR/azure-account.json"
-printf 'ISV administrator: %s\nCustomer administrator: %s\n' \
-  "$ISV_ADMIN_USERNAME" "$CUSTOMER_ADMIN_USERNAME" \
-  | tee "$EVIDENCE_DIR/admin-usernames.txt"
+## 2. Inspect the workload flow
+
+Open **four separate local Zsh terminals**, all starting in the repository root:
+
+| Terminal | Role |
+|---|---|
+| NVA terminal | Bastion SSH to the NVA, running tcpdump |
+| ISV terminal | Bastion SSH to the ISV workload, running the listener |
+| Customer terminal | Bastion SSH to the customer workload, sending messages |
+| Firewall terminal | Stay local and run the live log monitor in section 3 |
+
+**Run the following environment setup in every terminal, including the Firewall terminal, before its role-specific commands.** Use the same deployment name, evidence directory, and private key as section 1. Each terminal has its own shell environment; initializing one does not initialize the others. With multiple NVAs, open an additional initialized terminal and capture on each healthy backend.
+
+```zsh
+set -o pipefail
+export DEPLOYMENT_NAME=local-demo
+export TF_WORKSPACE="$DEPLOYMENT_NAME"
+export EVIDENCE_DIR="evidence_$DEPLOYMENT_NAME"
+# If using a different private key, export SSH_KEY here before loading.
+if ! source ./environment.sh; then
+  printf 'ERROR: Environment loading failed in this terminal. Match section 1 settings and resolve the loader messages before opening SSH or monitoring logs.\n' >&2
+  false
+fi
 ```
 
-## 2. Confirm provisioning and routing state
+Replace the example exports if your deployment differs. Verify the private key checked in section 1 is readable in each terminal, and stop if environment loading fails. Run this setup **locally before opening SSH**; remote commands below do not need the local environment variables. The remote commands use the VM's existing shell and do not require installing Zsh on the VMs.
 
-```bash
-az network vhub show \
-  --ids "$VIRTUAL_HUB_ID" \
-  --query '{provisioningState:provisioningState,routingState:routingState}' \
-  --output json > "$EVIDENCE_DIR/virtual-hub-status.json"
-az network vhub show \
-  --ids "$VIRTUAL_HUB_ID" \
-  --query '{provisioningState:provisioningState,routingState:routingState}' \
-  --output table | tee "$EVIDENCE_DIR/virtual-hub-status.txt"
+**Default IPs:** the tcpdump and netcat examples use customer `10.10.1.10` and ISV `192.168.1.4`, matching the demo tfvars. If you changed ranges or VM private IPs, replace these literals with the addresses printed in section 1.
 
-az network vhub connection show \
-  --ids "$CUSTOMER_WORKLOAD_CONNECTION_ID" \
-  --output json > "$EVIDENCE_DIR/customer-hub-connection-status.json"
-az network vhub connection show \
-  --ids "$CUSTOMER_WORKLOAD_CONNECTION_ID" \
-  --query '{name:name,provisioningState:provisioningState}' \
-  --output table | tee "$EVIDENCE_DIR/customer-hub-connection-status.txt"
+### NVA terminal: capture
 
-az network vhub connection show \
-  --ids "$ISV_HUB_CONNECTION_ID" \
-  --output json > "$EVIDENCE_DIR/isv-hub-connection-status.json"
-az network vhub connection show \
-  --ids "$ISV_HUB_CONNECTION_ID" \
-  --query '{name:name,provisioningState:provisioningState}' \
-  --output table | tee "$EVIDENCE_DIR/isv-hub-connection-status.txt"
-```
+Run locally. For additional NVAs, use `NVA_2_VM_ID` or `NVA_3_VM_ID`:
 
-Continue only when the hub provisioning state is `Succeeded`, the hub routing
-state is **`Provisioned`**, and both connections are `Succeeded`.
-
-When `virtual_hub_deploy_firewall` is enabled, `environment.sh` loads the
-firewall identifiers from the Terraform output JSON. Capture the provisioning
-state:
-
-```bash
-az network firewall show \
-  --ids "$CUSTOMER_FIREWALL_ID" \
-  --output json > "$EVIDENCE_DIR/customer-firewall-status.json"
-az resource show \
-  --ids "$CUSTOMER_FIREWALL_ROUTING_INTENT_ID" \
-  --output json > "$EVIDENCE_DIR/customer-firewall-routing-intent.json"
-```
-
-## 3. Inspect effective routes
-
-Use the repository helper for tunnel-free route inspection:
-
-```bash
-./scripts/show-effective-routes.sh \
-  --virtual-hub-id "$VIRTUAL_HUB_ID" \
-  --customer-nic-id "$CUSTOMER_WORKLOAD_NIC_ID" \
-  --isv-nic-id "$ISV_WORKLOAD_NIC_ID" \
-  --nva-nic-id "$NVA_1_NIC_ID" \
-  | tee "$EVIDENCE_DIR/effective-routes.txt"
-```
-
-Capture the underlying structured Azure CLI results separately:
-
-```bash
-az network vhub get-effective-routes \
-  --ids "$VIRTUAL_HUB_ID" \
-  --resource-type RouteTable \
-  --resource-id "$DEFAULT_HUB_ROUTE_TABLE_ID" \
-  --output json > "$EVIDENCE_DIR/virtual-hub-effective-routes.json"
-
-az network nic show-effective-route-table \
-  --ids "$CUSTOMER_WORKLOAD_NIC_ID" \
-  --output json > "$EVIDENCE_DIR/customer-nic-effective-routes.json"
-az network nic show-effective-route-table \
-  --ids "$ISV_WORKLOAD_NIC_ID" \
-  --output json > "$EVIDENCE_DIR/isv-nic-effective-routes.json"
-az network nic show-effective-route-table \
-  --ids "$NVA_1_NIC_ID" \
-  --output json > "$EVIDENCE_DIR/nva-1-nic-effective-routes.json"
-```
-
-Confirm the customer learns the ISV prefix, the ISV workload sends the customer
-prefix to `$NVA_LOAD_BALANCER_FRONTEND_IP`, and NVA 1 can route the customer
-prefix through the hub. Routes support the traffic evidence; they do not
-replace it.
-
-When the configured ISV destination prefix covers the full VNet, the physical
-workload subnet remains unchanged. No additional infrastructure deny rules are
-configured. Keep the return-path UDR off the NVA and Bastion subnets, but do
-not treat that as an ingress filter. The full connection route can affect hub
-traffic addressed to their private IPs; ordinary Bastion public access and
-local SSH use a different path.
-
-With Internet Traffic Routing Intent only, confirm that the customer workload
-NIC learns `0.0.0.0/0` through Azure Firewall while private routes retain the
-NVA path. With Private Traffic Routing Intent also enabled, private hub routes
-are expected to target Azure Firewall. Record the effective routes and use
-packet captures and counters to establish the actual NVA and return paths;
-do not treat Firewall private routes alone as a failed deployment.
-
-## 4. Capture counters, then test both directions
-
-Capture the baseline NVA counters. The helper owns the Bastion tunnel details.
-
-```bash
-./scripts/show-nva-counters.sh \
-  --bastion-name "$ISV_BASTION_NAME" \
-  --resource-group "$ISV_RESOURCE_GROUP" \
-  --admin-username "$ISV_ADMIN_USERNAME" \
-  --ssh-key "$SSH_KEY" \
-  "${NVA_COUNTER_ARGS[@]}" \
-  --subscription "$AZURE_SUBSCRIPTION" \
-  | tee "$EVIDENCE_DIR/nva-counters-before.txt"
-```
-
-Customer to ISV:
-
-```bash
-./scripts/test-connectivity.sh \
-  --direction customer-to-isv \
-  --source-bastion-name "$CUSTOMER_BASTION_NAME" \
-  --source-resource-group "$CUSTOMER_RESOURCE_GROUP" \
-  --source-vm-id "$CUSTOMER_WORKLOAD_VM_ID" \
-  --source-username "$CUSTOMER_ADMIN_USERNAME" \
-  --ssh-key "$SSH_KEY" \
-  --destination-ip "$ISV_WORKLOAD_PRIVATE_IP" \
-  --expected-source-ip "$CUSTOMER_WORKLOAD_PRIVATE_IP" \
-  --tcp-port 2000 \
-  --destination-bastion-name "$ISV_BASTION_NAME" \
-  --destination-resource-group "$ISV_RESOURCE_GROUP" \
-  --destination-vm-id "$ISV_WORKLOAD_VM_ID" \
-  --destination-username "$ISV_ADMIN_USERNAME" \
-  --subscription "$AZURE_SUBSCRIPTION" \
-  | tee "$EVIDENCE_DIR/connectivity-customer-to-isv.txt"
-```
-
-ISV to customer:
-
-```bash
-./scripts/test-connectivity.sh \
-  --direction isv-to-customer \
-  --source-bastion-name "$ISV_BASTION_NAME" \
-  --source-resource-group "$ISV_RESOURCE_GROUP" \
-  --source-vm-id "$ISV_WORKLOAD_VM_ID" \
-  --source-username "$ISV_ADMIN_USERNAME" \
-  --ssh-key "$SSH_KEY" \
-  --destination-ip "$CUSTOMER_WORKLOAD_PRIVATE_IP" \
-  --expected-source-ip "$ISV_WORKLOAD_PRIVATE_IP" \
-  --tcp-port 2000 \
-  --destination-bastion-name "$CUSTOMER_BASTION_NAME" \
-  --destination-resource-group "$CUSTOMER_RESOURCE_GROUP" \
-  --destination-vm-id "$CUSTOMER_WORKLOAD_VM_ID" \
-  --destination-username "$CUSTOMER_ADMIN_USERNAME" \
-  --subscription "$AZURE_SUBSCRIPTION" \
-  | tee "$EVIDENCE_DIR/connectivity-isv-to-customer.txt"
-```
-
-Capture the counters again:
-
-```bash
-./scripts/show-nva-counters.sh \
-  --bastion-name "$ISV_BASTION_NAME" \
-  --resource-group "$ISV_RESOURCE_GROUP" \
-  --admin-username "$ISV_ADMIN_USERNAME" \
-  --ssh-key "$SSH_KEY" \
-  "${NVA_COUNTER_ARGS[@]}" \
-  --subscription "$AZURE_SUBSCRIPTION" \
-  | tee "$EVIDENCE_DIR/nva-counters-after.txt"
-```
-
-Successful raw TCP checks on port 2000, destination-observed source addresses,
-and increasing NVA counters are the authoritative result. No HTTP protocol is
-used. ICMP is only supporting evidence.
-
-## 5. Prove NVA 1 failover (disruptive)
-
-This procedure requires at least two NVAs. Skip section 5 when `NVA_COUNT` is
-`1`; the interactive capture in section 6 still works with one NVA.
-
-```bash
-test "$NVA_COUNT" -ge 2
-```
-
-> **WARNING:** These commands stop NVA 1. Never stop every NVA. There is no
-> automatic restoration if the shell, terminal, or command sequence is
-> interrupted. Copy the restore command below somewhere accessible before
-> starting, and run it immediately after the failover test.
-
-**NVA 1 restore command:**
-
-```bash
-az vm start \
-  --ids "$NVA_1_VM_ID"
-```
-
-Stop NVA 1 and record its state:
-
-```bash
-az vm stop \
-  --ids "$NVA_1_VM_ID"
-az vm wait \
-  --ids "$NVA_1_VM_ID" \
-  --updated \
-  --custom "instanceView.statuses[?code=='PowerState/stopped']"
-az vm get-instance-view \
-  --ids "$NVA_1_VM_ID" \
-  --output json > "$EVIDENCE_DIR/nva-1-stopped-instance-view.json"
-sleep 30
-```
-
-Test customer-to-ISV traffic while NVA 1 is stopped:
-
-```bash
-./scripts/test-connectivity.sh \
-  --direction customer-to-isv \
-  --source-bastion-name "$CUSTOMER_BASTION_NAME" \
-  --source-resource-group "$CUSTOMER_RESOURCE_GROUP" \
-  --source-vm-id "$CUSTOMER_WORKLOAD_VM_ID" \
-  --source-username "$CUSTOMER_ADMIN_USERNAME" \
-  --ssh-key "$SSH_KEY" \
-  --destination-ip "$ISV_WORKLOAD_PRIVATE_IP" \
-  --expected-source-ip "$CUSTOMER_WORKLOAD_PRIVATE_IP" \
-  --tcp-port 2000 \
-  --destination-bastion-name "$ISV_BASTION_NAME" \
-  --destination-resource-group "$ISV_RESOURCE_GROUP" \
-  --destination-vm-id "$ISV_WORKLOAD_VM_ID" \
-  --destination-username "$ISV_ADMIN_USERNAME" \
-  --subscription "$AZURE_SUBSCRIPTION" \
-  | tee "$EVIDENCE_DIR/failover-customer-to-isv.txt"
-```
-
-Test ISV-to-customer traffic while NVA 1 is stopped:
-
-```bash
-./scripts/test-connectivity.sh \
-  --direction isv-to-customer \
-  --source-bastion-name "$ISV_BASTION_NAME" \
-  --source-resource-group "$ISV_RESOURCE_GROUP" \
-  --source-vm-id "$ISV_WORKLOAD_VM_ID" \
-  --source-username "$ISV_ADMIN_USERNAME" \
-  --ssh-key "$SSH_KEY" \
-  --destination-ip "$CUSTOMER_WORKLOAD_PRIVATE_IP" \
-  --expected-source-ip "$ISV_WORKLOAD_PRIVATE_IP" \
-  --tcp-port 2000 \
-  --destination-bastion-name "$CUSTOMER_BASTION_NAME" \
-  --destination-resource-group "$CUSTOMER_RESOURCE_GROUP" \
-  --destination-vm-id "$CUSTOMER_WORKLOAD_VM_ID" \
-  --destination-username "$CUSTOMER_ADMIN_USERNAME" \
-  --subscription "$AZURE_SUBSCRIPTION" \
-  | tee "$EVIDENCE_DIR/failover-isv-to-customer.txt"
-```
-
-**Restore NVA 1 now, even if the traffic test failed:**
-
-```bash
-az vm start \
-  --ids "$NVA_1_VM_ID"
-az vm wait \
-  --ids "$NVA_1_VM_ID" \
-  --updated \
-  --custom "instanceView.statuses[?code=='PowerState/running']"
-az vm get-instance-view \
-  --ids "$NVA_1_VM_ID" \
-  --output json > "$EVIDENCE_DIR/nva-1-restored-instance-view.json"
-```
-
-Capture counters and confirm one or more remaining NVAs handled the failover
-traffic:
-
-```bash
-./scripts/show-nva-counters.sh \
-  --bastion-name "$ISV_BASTION_NAME" \
-  --resource-group "$ISV_RESOURCE_GROUP" \
-  --admin-username "$ISV_ADMIN_USERNAME" \
-  --ssh-key "$SSH_KEY" \
-  "${NVA_COUNTER_ARGS[@]}" \
-  --subscription "$AZURE_SUBSCRIPTION" \
-  | tee "$EVIDENCE_DIR/nva-counters-after-failover.txt"
-```
-
-## 6. Observe forwarded traffic interactively
-
-With multiple NVAs, this test stops every NVA except NVA 1 so the load
-balancer must select NVA 1; this is disruptive. With one NVA, skip the VM
-start/stop/restore commands and leave it running.
-
-Use three interactive SSH sessions and, when Firewall is enabled, a fourth
-local terminal:
-
-1. NVA 1, running `tcpdump`.
-2. The ISV workload VM, listening on raw TCP port 2000.
-3. The customer workload VM, sending a short message to that listener.
-4. The local repository shell, querying structured Azure Firewall logs.
-
-> **WARNING:** Never stop every NVA. There is no automatic restoration if a
-> terminal closes or a command is interrupted. Copy the restore command below
-> somewhere accessible before starting.
-
-**Restore all stopped NVAs:**
-
-```bash
-for nva_vm_id in "${NVA_VM_IDS[@]:1}"; do
-  az vm start --ids "$nva_vm_id"
-done
-unset nva_vm_id
-```
-
-Ensure NVA 1 is running before stopping the other NVAs:
-
-```bash
-az vm start \
-  --ids "$NVA_1_VM_ID"
-az vm wait \
-  --ids "$NVA_1_VM_ID" \
-  --updated \
-  --custom "instanceView.statuses[?code=='PowerState/running']"
-```
-
-Stop every other NVA and wait for Azure to report each one stopped:
-
-```bash
-for nva_vm_id in "${NVA_VM_IDS[@]:1}"; do
-  nva_name="${nva_vm_id##*/}"
-  az vm stop --ids "$nva_vm_id"
-  az vm wait \
-    --ids "$nva_vm_id" \
-    --updated \
-    --custom "instanceView.statuses[?code=='PowerState/stopped']"
-  az vm get-instance-view \
-    --ids "$nva_vm_id" \
-    --output json > "$EVIDENCE_DIR/interactive-$nva_name-stopped.json"
-done
-unset nva_vm_id nva_name
-sleep 30
-```
-
-### Terminal 1: capture forwarded packets on NVA 1
-
-Open an interactive SSH session:
-
-```bash
+```zsh
 az network bastion ssh \
   --name "$ISV_BASTION_NAME" \
   --resource-group "$ISV_RESOURCE_GROUP" \
@@ -438,25 +124,21 @@ az network bastion ssh \
   --subscription "$AZURE_SUBSCRIPTION"
 ```
 
-In the NVA 1 SSH session, start the `tcpdump` installed by cloud-init. The IP
-addresses below are the checked-in demo workload addresses:
+Run **on the NVA** and leave the capture running:
 
-```bash
+```zsh
 sudo tcpdump -lnni any \
   'host 10.10.1.10 and host 192.168.1.4 and tcp port 2000' \
   | grep --line-buffered ' eth0 '
 ```
 
-Capturing on `any` retains Linux's `In` and `Out` direction metadata. Filtering
-the displayed output to `eth0` removes duplicate observations from Azure
-Accelerated Networking's virtual-function interface. Leave `tcpdump` running.
-Press `Ctrl+C` after the message has been sent.
+`any` retains Linux ingress/egress metadata. The line-buffered grep displays only `eth0`, removing duplicate observations from interfaces such as `enP39...` while keeping output live. Match the same IP/port tuple entering and leaving the NVA to establish forwarding.
 
-### Terminal 2: listen on the ISV workload VM
+### ISV terminal: listen
 
-Open another interactive SSH session:
+Run locally:
 
-```bash
+```zsh
 az network bastion ssh \
   --name "$ISV_BASTION_NAME" \
   --resource-group "$ISV_RESOURCE_GROUP" \
@@ -467,20 +149,19 @@ az network bastion ssh \
   --subscription "$AZURE_SUBSCRIPTION"
 ```
 
-In the ISV workload SSH session, use the netcat installed by cloud-init to
-listen on raw TCP port 2000:
+Run **on the ISV workload** and leave the listener running:
 
-```bash
-nc -lk 2000
+```zsh
+nc -lnvk 2000
 ```
 
-Leave the listener running.
+The verbose listener prints the connecting peer's IP and received messages.
 
-### Terminal 3: send from the customer workload VM
+### Customer terminal: send
 
-Open a third interactive SSH session:
+Run locally:
 
-```bash
+```zsh
 az network bastion ssh \
   --name "$CUSTOMER_BASTION_NAME" \
   --resource-group "$CUSTOMER_RESOURCE_GROUP" \
@@ -491,248 +172,195 @@ az network bastion ssh \
   --subscription "$AZURE_SUBSCRIPTION"
 ```
 
-In the customer workload SSH session, use the netcat installed by cloud-init
-to send a short message to the ISV workload:
+Run **on the customer workload**, customizing the destination if needed:
 
-```bash
-echo 'hello-through-nva' | nc -w 3 192.168.1.4 2000
+```zsh
+printf 'hello-through-nva\n' | nc -w 3 192.168.1.4 2000
 ```
 
-The ISV workload listener in terminal 2 should print:
+The ISV listener should print `hello-through-nva` and report the original customer IP (`10.10.1.10` by default). A message or unchanged peer IP alone does not prove NVA traversal; inspect the request and reply packets.
+
+### Expected NVA capture
+
+**Both requests and replies must enter and leave the NVA path.** The output should resemble the following sample. Timestamps, ephemeral ports, sequence numbers, and TCP options vary; customized addresses will differ:
 
 ```text
-hello-through-nva
+08:46:58.440874 eth0  In  IP 10.10.1.10.55582 > 192.168.1.4.2000: Flags [S], seq 2504157354, win 64240, options [mss 1376,sackOK,TS val 1470980990 ecr 0,nop,wscale 10], length 0
+08:46:58.440901 eth0  Out IP 10.10.1.10.55582 > 192.168.1.4.2000: Flags [S], seq 2504157354, win 64240, options [mss 1376,sackOK,TS val 1470980990 ecr 0,nop,wscale 10], length 0
+08:46:58.442983 eth0  In  IP 192.168.1.4.2000 > 10.10.1.10.55582: Flags [S.], seq 2893647747, ack 2504157355, win 65160, options [mss 1418,sackOK,TS val 4208439375 ecr 1470980990,nop,wscale 10], length 0
+08:46:58.442987 eth0  Out IP 192.168.1.4.2000 > 10.10.1.10.55582: Flags [S.], seq 2893647747, ack 2504157355, win 65160, options [mss 1418,sackOK,TS val 4208439375 ecr 1470980990,nop,wscale 10], length 0
+08:46:58.448749 eth0  In  IP 10.10.1.10.55582 > 192.168.1.4.2000: Flags [.], ack 1, win 63, options [nop,nop,TS val 1470981001 ecr 4208439375], length 0
+08:46:58.448749 eth0  In  IP 10.10.1.10.55582 > 192.168.1.4.2000: Flags [P.], seq 1:19, ack 1, win 63, options [nop,nop,TS val 1470981001 ecr 4208439375], length 18
+08:46:58.448758 eth0  Out IP 10.10.1.10.55582 > 192.168.1.4.2000: Flags [.], ack 1, win 63, options [nop,nop,TS val 1470981001 ecr 4208439375], length 0
+08:46:58.448762 eth0  Out IP 10.10.1.10.55582 > 192.168.1.4.2000: Flags [P.], seq 1:19, ack 1, win 63, options [nop,nop,TS val 1470981001 ecr 4208439375], length 18
+08:46:58.449112 eth0  In  IP 192.168.1.4.2000 > 10.10.1.10.55582: Flags [.], ack 19, win 64, options [nop,nop,TS val 4208439382 ecr 1470981001], length 0
+08:46:58.449116 eth0  Out IP 192.168.1.4.2000 > 10.10.1.10.55582: Flags [.], ack 19, win 64, options [nop,nop,TS val 4208439382 ecr 1470981001], length 0
+08:47:01.452029 eth0  In  IP 10.10.1.10.55582 > 192.168.1.4.2000: Flags [F.], seq 19, ack 1, win 63, options [nop,nop,TS val 1470984004 ecr 4208439382], length 0
+08:47:01.452051 eth0  Out IP 10.10.1.10.55582 > 192.168.1.4.2000: Flags [F.], seq 19, ack 1, win 63, options [nop,nop,TS val 1470984004 ecr 4208439382], length 0
+08:47:01.452607 eth0  In  IP 192.168.1.4.2000 > 10.10.1.10.55582: Flags [F.], seq 1, ack 20, win 64, options [nop,nop,TS val 4208442385 ecr 1470984004], length 0
+08:47:01.452611 eth0  Out IP 192.168.1.4.2000 > 10.10.1.10.55582: Flags [F.], seq 1, ack 20, win 64, options [nop,nop,TS val 4208442385 ecr 1470984004], length 0
+08:47:01.453603 eth0  In  IP 10.10.1.10.55582 > 192.168.1.4.2000: Flags [.], ack 2, win 63, options [nop,nop,TS val 1470984006 ecr 4208442385], length 0
+08:47:01.453606 eth0  Out IP 10.10.1.10.55582 > 192.168.1.4.2000: Flags [.], ack 2, win 63, options [nop,nop,TS val 1470984006 ecr 4208442385], length 0
 ```
 
-NVA 1 in terminal 1 should show packet metadata for the TCP handshake, data
-packet, and acknowledgments. Packet payload is intentionally not printed. The
-ephemeral source port, sequence numbers, and timestamps will differ, but the
-relevant lines should resemble:
+- The customer SYN (`[S]`) has paired `In` and `Out` lines with the same original source IP.
+- The ISV SYN-ACK (`[S.]`) also has paired `In` and `Out` lines, proving the reply crosses the NVA.
+- Data (`[P.]`), acknowledgments (`[.]`), and connection close (`[F.]`) show the same pattern.
 
-```text
-eth0 In  IP 10.10.1.10.54321 > 192.168.1.4.2000: Flags [S]
-eth0 Out IP 10.10.1.10.54321 > 192.168.1.4.2000: Flags [S]
-eth0 In  IP 192.168.1.4.2000 > 10.10.1.10.54321: Flags [S.]
-eth0 In  IP 10.10.1.10.54321 > 192.168.1.4.2000: Flags [P.], length 18
+**If only one traffic direction passes through the NVA path, routing is asymmetric.** With multiple NVAs, inspect all captures before concluding that requests or replies bypass the cluster; a direction may traverse a different healthy NVA. Missing packets in one capture can also result from capture loss or filtering. This walkthrough inspects both directions of one customer-initiated connection, not a separate ISV-initiated connection.
+
+Keep the ISV listener and NVA capture running while following Firewall logs. Resend from the customer terminal as needed.
+
+## 3. Inspect Firewall logs
+
+Use the **separate local Firewall terminal initialized in section 2**. Do not run these commands inside a Bastion SSH session. The query uses actual resource IDs and workload IPs from that terminal's environment.
+
+Skip this section when Firewall is disabled. Install `watch` if needed; on macOS with Homebrew, use `brew install watch`. The Azure CLI `log-analytics` extension is also required. Flow Trace additionally needs `AFWEnableTcpConnectionLogging`; see [logging troubleshooting](#firewall-logs-are-missing).
+
+```zsh
+if [[ -z "${CUSTOMER_FIREWALL_ID:-}" || -z "${CUSTOMER_FIREWALL_LOG_ANALYTICS_WORKSPACE_ID:-}" || -z "${CUSTOMER_WORKLOAD_PRIVATE_IP:-}" || -z "${ISV_WORKLOAD_PRIVATE_IP:-}" ]]; then
+  printf 'ERROR: Firewall or workload data is not loaded. Skip if Firewall is disabled; otherwise rerun the section 2 setup in this terminal.\n' >&2
+  false
+fi
+if ! command -v watch >/dev/null; then
+  printf 'ERROR: watch is missing. On macOS run brew install watch; on Linux install your distribution'\''s watch package.\n' >&2
+  false
+fi
+if ! az extension show --name log-analytics >/dev/null; then
+  printf 'ERROR: Install the CLI extension with: az extension add --name log-analytics --allow-preview true\n' >&2
+  false
+fi
 ```
 
-The `In` and `Out` observations on `eth0` prove that NVA 1 received and
-forwarded the connection. The unchanged source and destination addresses prove
-that it forwarded the flow without SNAT.
+Resolve any errors above before constructing the query and starting the monitor:
 
-### Terminal 4: inspect structured Azure Firewall logs
-
-Return to the local repository shell. Export one query that combines the
-network-rule decision with Flow Trace TCP lifecycle events for only the private
-TCP/2000 flow:
-
-```bash
-export FIREWALL_TCP_2000_QUERY="
+```zsh
+export FIREWALL_TCP_QUERY="
 union isfuzzy=true
 (
     AZFWNetworkRule
-    | where TimeGenerated > ago(30m)
-    | where _ResourceId =~ '$CUSTOMER_FIREWALL_ID'
+    | where TimeGenerated > ago(30m) and _ResourceId =~ '$CUSTOMER_FIREWALL_ID'
     | where SourceIp == '$CUSTOMER_WORKLOAD_PRIVATE_IP'
-    | where DestinationIp == '$ISV_WORKLOAD_PRIVATE_IP'
-    | where DestinationPort == 2000
+        and DestinationIp == '$ISV_WORKLOAD_PRIVATE_IP' and DestinationPort == 2000
     | project TimeGenerated, RecordType = 'NetworkRule', SourceIp, SourcePort,
-              DestinationIp, DestinationPort, Protocol, Action,
-              Detail = strcat(RuleCollection, '/', Rule)
+        DestinationIp, DestinationPort, Protocol, Action,
+        Detail = strcat(RuleCollection, '/', Rule)
 ),
 (
     AZFWFlowTrace
-    | where TimeGenerated > ago(30m)
-    | where _ResourceId =~ '$CUSTOMER_FIREWALL_ID'
+    | where TimeGenerated > ago(30m) and _ResourceId =~ '$CUSTOMER_FIREWALL_ID'
     | where SourceIp == '$CUSTOMER_WORKLOAD_PRIVATE_IP'
-    | where DestinationIp == '$ISV_WORKLOAD_PRIVATE_IP'
-    | where DestinationPort == 2000
+        and DestinationIp == '$ISV_WORKLOAD_PRIVATE_IP' and DestinationPort == 2000
     | project TimeGenerated, RecordType = 'FlowTrace', SourceIp, SourcePort,
-              DestinationIp, DestinationPort, Protocol, Action,
-              Detail = strcat(Flag, ' ', ActionReason)
+        DestinationIp, DestinationPort, Protocol, Action,
+        Detail = strcat(Flag, ' ', ActionReason)
 )
 | order by TimeGenerated asc
 "
+watch -n 10 -x az monitor log-analytics query \
+  --workspace "$CUSTOMER_FIREWALL_LOG_ANALYTICS_WORKSPACE_ID" \
+  --analytics-query "$FIREWALL_TCP_QUERY" \
+  -o table
 ```
 
-Continuously render the combined results as a table. Azure Monitor ingestion
-can take up to 30 minutes after a diagnostic category is first enabled;
-`watch` refreshes the query every ten seconds while the records arrive:
+`watch` refreshes the table every ten seconds; `-x` passes the multiline query directly to Azure CLI without another shell interpreting it. Leave this monitor running and resend the message from the customer terminal. Keep the ISV listener and NVA capture running in their own terminals. Press `Ctrl+C` in each terminal to stop its monitor, capture, or listener when finished.
 
-```bash
-watch --interval 10 --no-title \
-  'az monitor log-analytics query \
-    --workspace "$CUSTOMER_FIREWALL_LOG_ANALYTICS_WORKSPACE_ID" \
-    --analytics-query "$FIREWALL_TCP_2000_QUERY" \
-    --output table'
-```
+New diagnostic settings can take up to 30 minutes to start delivering logs. A network-rule record proves a Firewall policy decision; Flow Trace adds TCP lifecycle details. Neither proves NVA traversal. Empty results do not prove Firewall bypass, and missing-table/query errors are not successful empty results. Correlate timestamps and flow tuples with the NVA capture.
 
-Leave `watch` running and resend the netcat message from terminal 3. On a new
-diagnostic setting, repeat the send after the initial 30-minute warm-up if Flow
-Trace is still empty.
+## Troubleshooting
 
-Interpret the continuously refreshed results together with the routing intent
-captured earlier:
+Run these diagnostics in an initialized **local terminal**, except where a remote NVA command is explicitly identified. [Routing Intent constraints](../design.md#optional-firewall-and-routing-intent) can affect the observed path; `Contains` or a propagated route alone does not guarantee NVA traversal.
 
-- With only the `InternetTraffic` policy enabled, a successful TCP/2000
-  connection should appear on the NVA capture and normally produce no Azure
-  Firewall record.
-- With the `PrivateTraffic` policy enabled, the TCP/2000 attempt is sent to
-  Azure Firewall and should produce a network-rule record. Root 04 no longer
-  configures an explicit propagated-route-table block, so capture the actual
-  NVA traversal and return-path behavior rather than assuming the result of the
-  earlier Routing Intent experiment.
+### Deployment or connections are not ready
 
-A network-rule row proves the Firewall policy decision, while Flow Trace adds
-the TCP lifecycle flags. An empty result alone does not prove Firewall bypass
-because ingestion can be delayed or misconfigured. Press `Ctrl+C` to stop
-`watch`, `tcpdump`, and netcat, then close the three SSH sessions.
-
-**Restore every stopped NVA now:**
-
-```bash
-for nva_vm_id in "${NVA_VM_IDS[@]:1}"; do
-  nva_name="${nva_vm_id##*/}"
-  az vm start --ids "$nva_vm_id"
-  az vm wait \
-    --ids "$nva_vm_id" \
-    --updated \
-    --custom "instanceView.statuses[?code=='PowerState/running']"
-  az vm get-instance-view \
-    --ids "$nva_vm_id" \
-    --output json > "$EVIDENCE_DIR/interactive-$nva_name-restored.json"
+```zsh
+az network vhub show \
+  --ids "$VIRTUAL_HUB_ID" \
+  --query '{provisioning:provisioningState,routing:routingState}' \
+  -o json | tee "$EVIDENCE_DIR/virtual-hub-status.json"
+for connection_id in "$CUSTOMER_WORKLOAD_CONNECTION_ID" "$ISV_HUB_CONNECTION_ID"; do
+  if ! az network vhub connection show \
+    --ids "$connection_id" \
+    --query '{id:id,state:provisioningState,routing:routingConfiguration}' \
+    -o json | tee "$EVIDENCE_DIR/${connection_id##*/}-status.json"; then
+    printf 'ERROR: Cannot inspect connection %s. Check Azure access and whether its deployment completed.\n' "$connection_id" >&2
+    break
+  fi
 done
-unset nva_vm_id nva_name
 ```
 
-Wait for every restored load-balancer backend probe to recover before
-continuing.
+Require hub provisioning `Succeeded`, routing `Provisioned`, and both connections `Succeeded`. Inspect the load balancer's **Health Probe Status** metric and VM extension state as described in [deployment stage 1](../README.md#1-isv-core).
 
-## 7. Negative controls (optional and destructive)
+If a probe is unhealthy, run **in the remote NVA SSH session**:
 
-> **STRONG WARNING:** Each control intentionally destroys managed routing
-> resources and interrupts connectivity. Run only in an approved maintenance
-> window. Run only one control at a time. There is no automatic restoration
-> after interruption. The commands are interactive and intentionally omit
-> `-auto-approve`; read every Terraform prompt before approving. These examples
-> use the active `${DEPLOYMENT_NAME}.tfvars` and matching workspace selected in
-> section 1.
-
-### Remove and restore the ISV return-path route
-
-Destroy the route layer:
-
-```bash
-terraform -chdir=03-isv-routing destroy \
-  -input=true \
-  -no-color \
-  -var-file="$DEPLOYMENT_NAME.tfvars" \
-  | tee "$EVIDENCE_DIR/negative-udr-destroy.txt"
+```zsh
+cloud-init status --long
+systemctl status forwarding-health.socket
 ```
 
-Run customer-to-ISV traffic with the destination observer. Without the UDR,
-the result may be failed connectivity or a return path that bypasses the NVA.
-Compare the NVA counters with the earlier baseline to identify the result:
+### Traffic fails or bypasses the NVA
 
-```bash
-./scripts/test-connectivity.sh \
-  --direction customer-to-isv \
-  --source-bastion-name "$CUSTOMER_BASTION_NAME" \
-  --source-resource-group "$CUSTOMER_RESOURCE_GROUP" \
-  --source-vm-id "$CUSTOMER_WORKLOAD_VM_ID" \
-  --source-username "$CUSTOMER_ADMIN_USERNAME" \
-  --ssh-key "$SSH_KEY" \
-  --destination-ip "$ISV_WORKLOAD_PRIVATE_IP" \
-  --expected-source-ip "$CUSTOMER_WORKLOAD_PRIVATE_IP" \
-  --tcp-port 2000 \
-  --destination-bastion-name "$ISV_BASTION_NAME" \
-  --destination-resource-group "$ISV_RESOURCE_GROUP" \
-  --destination-vm-id "$ISV_WORKLOAD_VM_ID" \
-  --destination-username "$ISV_ADMIN_USERNAME" \
-  --subscription "$AZURE_SUBSCRIPTION" \
-  2>&1 | tee "$EVIDENCE_DIR/negative-udr-connectivity.txt" \
-  || printf 'Connectivity failure observed with the ISV route removed.\n'
+Run locally:
+
+```zsh
+./scripts/show-effective-routes.sh \
+  --virtual-hub-id "$VIRTUAL_HUB_ID" \
+  --customer-nic-id "$CUSTOMER_WORKLOAD_NIC_ID" \
+  --isv-nic-id "$ISV_WORKLOAD_NIC_ID" \
+  --nva-nic-id "$NVA_1_NIC_ID" \
+  2>&1 | tee "$EVIDENCE_DIR/effective-routes.txt"
 ```
 
-Restore the route layer immediately:
+The helper runs its own Bash interpreter; it can be invoked from Zsh. It inspects `defaultRouteTable`, matching the demo. Repeat for additional NVA NICs if needed. Check the ISV workload's customer-prefix UDR uses `NVA_LOAD_BALANCER_FRONTEND_IP`, the NVA has a customer route through the hub, and the connection static route has the configured ISV destination. Do not attach the workload return-path UDR to the NVA subnet.
 
-```bash
-terraform -chdir=03-isv-routing apply \
-  -input=true \
-  -no-color \
-  -var-file="$DEPLOYMENT_NAME.tfvars" \
-  | tee "$EVIDENCE_DIR/negative-udr-restore.txt"
+For structured route evidence:
+
+```zsh
+az network vhub get-effective-routes \
+  --ids "$VIRTUAL_HUB_ID" \
+  --resource-type RouteTable \
+  --resource-id "$DEFAULT_HUB_ROUTE_TABLE_ID" \
+  -o json > "$EVIDENCE_DIR/virtual-hub-effective-routes.json"
+for nic_id in "$CUSTOMER_WORKLOAD_NIC_ID" "$ISV_WORKLOAD_NIC_ID" "${NVA_NIC_IDS[@]}"; do
+  if ! az network nic show-effective-route-table \
+    --ids "$nic_id" \
+    -o json > "$EVIDENCE_DIR/${nic_id##*/}-routes.json"; then
+    printf 'ERROR: Cannot inspect routes for NIC %s. Check that the VM is running and you can read the NIC.\n' "$nic_id" >&2
+    break
+  fi
+done
 ```
 
-### Remove and restore the customer-managed ISV connection
+Routes support packet evidence; they do not replace it. If SSH fails, check Bastion tunneling, subscription/user/key selection, and subnet NSGs. If `nc` or `tcpdump` is missing on a VM, investigate its cloud-init/extension failure rather than treating the flow as verified.
 
-Destroy the connection layer:
+### Firewall logs are missing
 
-```bash
-terraform -chdir=04-customer-connection destroy \
-  -input=true \
-  -no-color \
-  -var-file="$DEPLOYMENT_NAME.tfvars" \
-  | tee "$EVIDENCE_DIR/negative-connection-destroy.txt"
+Skip these diagnostics when Firewall is disabled. Run locally:
+
+```zsh
+az network firewall show \
+  --ids "$CUSTOMER_FIREWALL_ID" \
+  -o json > "$EVIDENCE_DIR/customer-firewall-status.json"
+az resource show \
+  --ids "$CUSTOMER_FIREWALL_ROUTING_INTENT_ID" \
+  -o json > "$EVIDENCE_DIR/customer-firewall-routing-intent.json"
+az feature show \
+  --namespace Microsoft.Network \
+  --name AFWEnableTcpConnectionLogging \
+  --query properties.state \
+  -o tsv
 ```
 
-Confirm customer-to-ISV traffic no longer succeeds:
+Flow Trace requires the feature state `Registered`. Have the subscription owner enable it using the [Flow Trace procedure](https://learn.microsoft.com/azure/firewall/monitor-firewall-reference#flow-trace). Network-rule logs are useful without Flow Trace. An API permission error is not evidence that the feature is disabled.
 
-```bash
-./scripts/test-connectivity.sh \
-  --direction customer-to-isv \
-  --source-bastion-name "$CUSTOMER_BASTION_NAME" \
-  --source-resource-group "$CUSTOMER_RESOURCE_GROUP" \
-  --source-vm-id "$CUSTOMER_WORKLOAD_VM_ID" \
-  --source-username "$CUSTOMER_ADMIN_USERNAME" \
-  --ssh-key "$SSH_KEY" \
-  --destination-ip "$ISV_WORKLOAD_PRIVATE_IP" \
-  --expected-source-ip "$CUSTOMER_WORKLOAD_PRIVATE_IP" \
-  --tcp-port 2000 \
-  --destination-bastion-name "$ISV_BASTION_NAME" \
-  --destination-resource-group "$ISV_RESOURCE_GROUP" \
-  --destination-vm-id "$ISV_WORKLOAD_VM_ID" \
-  --destination-username "$ISV_ADMIN_USERNAME" \
-  --subscription "$AZURE_SUBSCRIPTION" \
-  2>&1 | tee "$EVIDENCE_DIR/negative-connection-connectivity.txt" \
-  || printf 'Expected failure observed with the ISV connection removed.\n'
+If the CLI query command is unavailable, install its extension:
+
+```zsh
+az extension add --name log-analytics --allow-preview true
 ```
 
-Restore the connection layer immediately:
+Check diagnostics, ingestion delay, query errors, and actual Routing Intent before interpreting an empty result as a path decision.
 
-```bash
-terraform -chdir=04-customer-connection apply \
-  -input=true \
-  -no-color \
-  -var-file="$DEPLOYMENT_NAME.tfvars" \
-  | tee "$EVIDENCE_DIR/negative-connection-restore.txt"
-```
+## Cleanup
 
-After either negative control, repeat sections 2 through 4 only after the hub
-routing state returns to `Provisioned`.
-
-## 8. Cleanup
-
-Keep the named evidence files until the results have been reviewed and
-archived. To destroy the deployed infrastructure, use reverse dependency order
-and review each interactive confirmation:
-
-```bash
-terraform -chdir=04-customer-connection destroy \
-  -input=true -var-file="$DEPLOYMENT_NAME.tfvars"
-terraform -chdir=03-isv-routing destroy \
-  -input=true -var-file="$DEPLOYMENT_NAME.tfvars"
-terraform -chdir=02-customer-core destroy \
-  -input=true -var-file="$DEPLOYMENT_NAME.tfvars"
-terraform -chdir=01-isv-core destroy \
-  -input=true -var-file="$DEPLOYMENT_NAME.tfvars"
-```
-
-Confirm that both resource groups and all billable Public IP, Bastion, disk,
-load-balancer, and Virtual WAN resources are gone. Remove local evidence only
-after it has been archived:
-
-```bash
-printf 'Evidence directory retained at: %s\n' "$EVIDENCE_DIR"
-rm -ri -- "$EVIDENCE_DIR"
-```
+Retain evidence until reviewed, then follow the single [teardown procedure](../README.md#destroy). Do not remove local state until all six resource groups and their resources are confirmed gone.
